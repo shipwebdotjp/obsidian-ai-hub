@@ -1,7 +1,11 @@
 import os
 import atexit
+import json
 import tempfile
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
+from typing import Literal, Optional
 
 import yaml
 
@@ -26,7 +30,6 @@ _APP_ENV_VARS = [
     "OBSIDIAN_AI_HUB_CORS_ORIGINS",
     "OPEN_WEB_UI_API_KEY",
     "OPEN_WEB_UI_BASE_URL",
-    "VAULT_PATH",
     "AI_LOG_PATH",
     "MEMORY_SQLITE_PATH",
     "SCREENSHOT_DIR",
@@ -105,13 +108,15 @@ if IS_TEST_ENV:
     TEST_WORKSPACE = Path(_test_workspace.name)
     atexit.register(_test_workspace.cleanup)
 
-    CONFIG_YML_PATH = BASE_DIR / "config" / "config.test.yml"
+    _custom_cfg = os.getenv("OAIHUB_CONFIG_YML_PATH")
+    CONFIG_YML_PATH = Path(_custom_cfg).expanduser() if _custom_cfg else (BASE_DIR / "config" / "config.test.yml")
 else:
     from dotenv import load_dotenv
 
     load_dotenv()
     ALLOW_EXTERNAL_IN_TEST = True
-    CONFIG_YML_PATH = BASE_DIR / "config" / "config.yml"
+    _custom_cfg = os.getenv("OAIHUB_CONFIG_YML_PATH")
+    CONFIG_YML_PATH = Path(_custom_cfg).expanduser() if _custom_cfg else (BASE_DIR / "config" / "config.yml")
 
 
 def ensure_external_allowed(context: str = ""):
@@ -177,6 +182,217 @@ def _config_optional_path(*config_keys):
     return Path(str(value)).expanduser()
 
 
+AiAccess = Literal["none", "read", "write"]
+VaultRole = Optional[Literal["primary"]]
+
+
+class VaultValidationError(ValueError):
+    """Raised when Vault Registry configuration is invalid."""
+
+    pass
+
+
+@dataclass(frozen=True)
+class VaultDescriptor:
+    vault_id: str
+    path: Path
+    display_name: str
+    role: VaultRole
+    ai_access: AiAccess
+
+
+@dataclass(frozen=True)
+class PrimaryVaultConfig:
+    inbox: str = "inbox"
+    daily: str = "daily"
+    template: str = "template"
+    knowledge: str = "copilot/knowledge"
+    research: str = "research"
+    activity: str = "activity"
+    webclip: str = "webclip"
+    people: str = "people"
+    dashboard: str = "dashboard"
+
+
+class VaultRegistry:
+    def __init__(
+        self, vaults: dict[str, VaultDescriptor], primary_config: PrimaryVaultConfig
+    ):
+        self._vaults = dict(vaults)
+        self._primary_config = primary_config
+
+    def get(self, vault_id: str) -> VaultDescriptor:
+        if vault_id not in self._vaults:
+            raise KeyError(f"Unknown vault ID: {vault_id}")
+        return self._vaults[vault_id]
+
+    def get_primary(self) -> VaultDescriptor:
+        for v in self._vaults.values():
+            if v.role == "primary":
+                return v
+        raise VaultValidationError("No primary vault found in registry")
+
+    def list_vaults(self) -> list[VaultDescriptor]:
+        return list(self._vaults.values())
+
+    @property
+    def primary_config(self) -> PrimaryVaultConfig:
+        return self._primary_config
+
+
+def validate_vault_registry(
+    raw_config: dict,
+    is_test_env: bool = False,
+    test_workspace: Path | None = None,
+) -> VaultRegistry:
+    if not isinstance(raw_config, dict):
+        raise VaultValidationError("Configuration must be a dictionary")
+
+    raw_config_map = dict(raw_config)
+    if is_test_env and ("vaults" not in raw_config_map or not raw_config_map.get("vaults")):
+        raw_config_map["vaults"] = {
+            "main": {
+                "path": "test_vaults/main",
+                "display_name": "Test Personal",
+                "role": "primary",
+                "ai_access": "read",
+            },
+            "blog": {
+                "path": "test_vaults/blog",
+                "display_name": "Test Blog",
+                "ai_access": "write",
+            },
+            "ai": {
+                "path": "test_vaults/ai",
+                "display_name": "Test AI Workspace",
+                "ai_access": "write",
+            },
+        }
+
+    if "vaults" not in raw_config_map:
+        raise VaultValidationError(
+            "Missing required 'vaults' configuration section in config.yml"
+        )
+
+    raw_vaults = raw_config_map.get("vaults")
+    if not isinstance(raw_vaults, dict) or not raw_vaults:
+        raise VaultValidationError("'vaults' section must be a non-empty dictionary")
+
+    descriptors: dict[str, VaultDescriptor] = {}
+    primary_count = 0
+
+    for vault_id, raw_v in raw_vaults.items():
+        if not isinstance(vault_id, str) or not vault_id.strip():
+            raise VaultValidationError(f"Invalid vault ID: {vault_id!r}")
+        vault_id = vault_id.strip()
+
+        if not isinstance(raw_v, dict):
+            raise VaultValidationError(
+                f"Vault configuration for '{vault_id}' must be a dictionary"
+            )
+
+        path_raw = raw_v.get("path")
+        if not path_raw:
+            raise VaultValidationError(
+                f"Vault '{vault_id}' is missing required field 'path'"
+            )
+
+        path_obj = Path(str(path_raw)).expanduser()
+        if not path_obj.is_absolute() and is_test_env and test_workspace:
+            path_obj = (test_workspace / path_obj).resolve()
+            path_obj.mkdir(parents=True, exist_ok=True)
+        else:
+            path_obj = path_obj.resolve()
+
+        if not path_obj.exists():
+            raise VaultValidationError(
+                f"Vault '{vault_id}' path does not exist: {path_obj}"
+            )
+        if not path_obj.is_dir():
+            raise VaultValidationError(
+                f"Vault '{vault_id}' path is not a directory: {path_obj}"
+            )
+
+        display_name = str(raw_v.get("display_name", "")).strip()
+        if not display_name:
+            raise VaultValidationError(
+                f"Vault '{vault_id}' is missing required field 'display_name'"
+            )
+
+        ai_access = str(raw_v.get("ai_access", "")).strip().lower()
+        if ai_access not in ("none", "read", "write"):
+            raise VaultValidationError(
+                f"Vault '{vault_id}' has invalid ai_access '{ai_access}'. "
+                "Must be one of 'none', 'read', 'write'."
+            )
+
+        role_raw = raw_v.get("role")
+        role: VaultRole = None
+        if role_raw is not None:
+            role_str = str(role_raw).strip().lower()
+            if role_str == "primary":
+                role = "primary"
+                primary_count += 1
+            elif role_str and role_str != "none":
+                raise VaultValidationError(
+                    f"Vault '{vault_id}' has invalid role '{role_raw}'"
+                )
+
+        descriptors[vault_id] = VaultDescriptor(
+            vault_id=vault_id,
+            path=path_obj,
+            display_name=display_name,
+            role=role,
+            ai_access=ai_access,  # type: ignore
+        )
+
+    if "main" not in descriptors:
+        raise VaultValidationError("Required vault 'main' is missing from 'vaults'")
+
+    main_vault = descriptors["main"]
+    if main_vault.role != "primary":
+        raise VaultValidationError("Vault 'main' must have role: 'primary'")
+
+    if primary_count != 1:
+        raise VaultValidationError(
+            f"Exactly one vault must have role: 'primary', found {primary_count}"
+        )
+
+    # Check for duplicate paths and nested paths
+    paths = [(vid, desc.path) for vid, desc in descriptors.items()]
+    for i in range(len(paths)):
+        id_i, path_i = paths[i]
+        for j in range(i + 1, len(paths)):
+            id_j, path_j = paths[j]
+            if path_i == path_j:
+                raise VaultValidationError(
+                    f"Vaults '{id_i}' and '{id_j}' share identical path: {path_i}"
+                )
+            if path_i.is_relative_to(path_j) or path_j.is_relative_to(path_i):
+                raise VaultValidationError(
+                    f"Vault paths for '{id_i}' ({path_i}) and '{id_j}' ({path_j}) are nested"
+                )
+
+    raw_primary = raw_config_map.get("primary_vault", {})
+    if raw_primary is not None and not isinstance(raw_primary, dict):
+        raise VaultValidationError("'primary_vault' section must be a dictionary")
+
+    primary_cfg_dict = raw_primary or {}
+    primary_config = PrimaryVaultConfig(
+        inbox=str(primary_cfg_dict.get("inbox", "inbox")),
+        daily=str(primary_cfg_dict.get("daily", "daily")),
+        template=str(primary_cfg_dict.get("template", "template")),
+        knowledge=str(primary_cfg_dict.get("knowledge", "copilot/knowledge")),
+        research=str(primary_cfg_dict.get("research", "research")),
+        activity=str(primary_cfg_dict.get("activity", "activity")),
+        webclip=str(primary_cfg_dict.get("webclip", "webclip")),
+        people=str(primary_cfg_dict.get("people", "people")),
+        dashboard=str(primary_cfg_dict.get("dashboard", "dashboard")),
+    )
+
+    return VaultRegistry(descriptors, primary_config)
+
+
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
@@ -190,24 +406,42 @@ OPENCODE_SESSION_ID = str(
     )
 ).strip() or "obsidian-ai-hub"
 
-if IS_TEST_ENV:
-    VAULT_PATH = TEST_WORKSPACE / "vault"
-else:
-    _vault_path_raw = os.getenv("VAULT_PATH")
-    if _vault_path_raw:
-        VAULT_PATH = Path(_vault_path_raw).expanduser()
-    else:
-        VAULT_PATH = Path(".").expanduser()
+# Vault Registry initialization
+try:
+    VAULT_REGISTRY = validate_vault_registry(
+        yaml_config,
+        is_test_env=IS_TEST_ENV,
+        test_workspace=TEST_WORKSPACE if IS_TEST_ENV else None,
+    )
+    REGISTRY_ERROR = None
+except VaultValidationError as exc:
+    VAULT_REGISTRY = None
+    REGISTRY_ERROR = str(exc)
 
-INBOX_DIR_NAME = str(_config_value("vault", "inbox", default="inbox"))
-DAILY_DIR_NAME = str(_config_value("vault", "daily", default="daily"))
-TEMPLATE_DIR_NAME = str(_config_value("vault", "template", default="template"))
-KNOWLEDGE_DIR_NAME = str(
-    _config_value("vault", "knowledge", default="copilot/knowledge")
-)
-RESEARCH_DIR_NAME = str(_config_value("vault", "research", default="research"))
-WEBCLIP_DIR_NAME = str(_config_value("vault", "webclip", default="webclip"))
-PEOPLE_DIR_NAME = str(_config_value("vault", "people", default="people"))
+if VAULT_REGISTRY is not None:
+    PRIMARY_VAULT = VAULT_REGISTRY.get_primary()
+    PRIMARY_VAULT_PATH = PRIMARY_VAULT.path
+    VAULT_PATH = PRIMARY_VAULT_PATH
+    INBOX_DIR_NAME = VAULT_REGISTRY.primary_config.inbox
+    DAILY_DIR_NAME = VAULT_REGISTRY.primary_config.daily
+    TEMPLATE_DIR_NAME = VAULT_REGISTRY.primary_config.template
+    KNOWLEDGE_DIR_NAME = VAULT_REGISTRY.primary_config.knowledge
+    RESEARCH_DIR_NAME = VAULT_REGISTRY.primary_config.research
+    WEBCLIP_DIR_NAME = VAULT_REGISTRY.primary_config.webclip
+    PEOPLE_DIR_NAME = VAULT_REGISTRY.primary_config.people
+    DASHBOARD_DIR_NAME = VAULT_REGISTRY.primary_config.dashboard
+else:
+    PRIMARY_VAULT = None
+    PRIMARY_VAULT_PATH = Path(".").expanduser()
+    VAULT_PATH = PRIMARY_VAULT_PATH
+    INBOX_DIR_NAME = "inbox"
+    DAILY_DIR_NAME = "daily"
+    TEMPLATE_DIR_NAME = "template"
+    KNOWLEDGE_DIR_NAME = "copilot/knowledge"
+    RESEARCH_DIR_NAME = "research"
+    WEBCLIP_DIR_NAME = "webclip"
+    PEOPLE_DIR_NAME = "people"
+    DASHBOARD_DIR_NAME = "dashboard"
 
 DAILY_TEMPLATE_FILENAME = str(_config_value("files", "daily_note", default="daily.md"))
 WEEKLY_TEMPLATE_FILENAME = str(
@@ -1151,8 +1385,29 @@ if IS_TEST_ENV:
     PLUGINS_TOOLS_DIR = TEST_WORKSPACE / "plugins" / "tools"
     AGENT_SKILLS_PRIMARY_ROOT = TEST_WORKSPACE / "primary_skills"
     AGENT_SKILLS_ROOT = TEST_WORKSPACE / "skills"
+    WEB_STATUS_PATH = TEST_WORKSPACE / "web_status.json"
 else:
+    WEB_STATUS_PATH = Path("~/.config/obsidian-ai-hub/web_status.json").expanduser()
     AGENT_SKILLS_PRIMARY_ROOT = Path("~/.agents/skills").expanduser()
+
+
+def update_web_status(status: str, error: str | None = None) -> None:
+    data = {
+        "status": status,
+        "updated_at": datetime.now().isoformat(),
+        "error": error,
+    }
+    WEB_STATUS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    WEB_STATUS_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def read_web_status() -> dict:
+    if not WEB_STATUS_PATH.exists():
+        return {"status": "unknown", "updated_at": None, "error": None}
+    try:
+        return json.loads(WEB_STATUS_PATH.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return {"status": "unknown", "updated_at": None, "error": str(exc)}
     _skills_dir_raw = _env_or_config(
         "OBSIDIAN_AI_HUB_SKILLS_DIR", "agent_skills", "root"
     )
