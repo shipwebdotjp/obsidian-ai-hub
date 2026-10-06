@@ -9,5 +9,5 @@
 | [todo.md](todo.md) | 実施順の ToDo リスト |
 | [roadmap.md](roadmap.md) | v2 以降の拡張候補 |
 
-v1 は未実装である。高コストかつ横断的な判断は、実装着手時に
-`ai_wiki/10-Decisions-Architecture.md` へ ADR として記録する。
+v1 は実装済みである（Phase 1〜4）。高コストかつ横断的な判断は
+`ai_wiki/10-Decisions-Architecture.md` へ ADR として記録してある。

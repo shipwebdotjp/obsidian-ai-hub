@@ -67,7 +67,7 @@ Vault のパスは `.env` には置きません。`config/config.yml` の `vault
 | --- | --- |
 | `ai_log_path` | AI ログのパス |
 | `vaults` | Vault Registry（Vault ID → パス・表示名・`role`・`ai_access`）。`main` は必須かつ唯一の `role: primary`。各ルートは既存ディレクトリで重複・入れ子不可 |
-| `primary_vault` | main 専用の既存業務フォルダ名（`inbox` / `daily` / `template` / `knowledge` / `research` / `activity` / `webclip` / `people` / `dashboard`）。blog / ai に同じ構造は要求しない |
+| `primary_vault` | main 専用の既存業務フォルダ名（`inbox` / `daily` / `template` / `knowledge` / `research` / `activity` / `webclip` / `people` / `dashboard`）。blog / ai に同じ構造は要求しない。`dashboard` のみ旧来の `vault.dashboard` で上書きできる |
 | `files` | ファイル名（日次ノート、週次テンプレート、リサーチ候補テーマリストなど） |
 | `backup.sync_folders` | `--backup` の rsync 対象（source / destination / 任意の excludes） |
 | `backup.rsync_executable` | `--backup` で使う rsync の実行ファイル絶対パス（未設定時は `rsync`） |

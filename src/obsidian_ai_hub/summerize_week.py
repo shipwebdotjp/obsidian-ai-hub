@@ -283,6 +283,7 @@ def summarize_week(target_date: datetime | date_type | str | None = None) -> dic
 
 
 def main(target_date: datetime | date_type | str | None = None):
+    config.ensure_vault_registry()
     # デフォルトでは実行日の属する週を対象とする
     summarize_week(target_date)
 

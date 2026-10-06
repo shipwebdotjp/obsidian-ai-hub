@@ -135,13 +135,19 @@ def check_vault_index_identity(vault_id: str) -> None:
         )
 
 
-def build_vault_search_index(vault_id: str | None = None) -> SearchIndex:
+def build_vault_search_index(
+    vault_id: str | None = None, *, check_identity: bool = True
+) -> SearchIndex:
     """Create a SearchIndex configured for one Vault.
 
     ``None`` resolves to the primary Vault (legacy single-vault callers).
+    Rebuild passes ``check_identity=False``: it re-creates the index, so a
+    stale path identity must not block construction (the fresh identity is
+    recorded after a successful rebuild).
     """
     descriptor = config.resolve_vault_descriptor(vault_id)
-    check_vault_index_identity(descriptor.vault_id)
+    if check_identity:
+        check_vault_index_identity(descriptor.vault_id)
     cache_dir = _prepare_model_cache_dir()
     sqlite_path, chroma_path = _prepare_storage_paths(descriptor.vault_id)
 
@@ -198,7 +204,7 @@ def sync_vaults(vault_ids: list[str] | None = None) -> dict[str, object]:
                 report.inserted_chunks,
                 report.deleted_chunks,
             )
-        except (ConfigMismatchError, FileNotFoundError, RuntimeError, ValueError) as exc:
+        except (ConfigMismatchError, FileNotFoundError, OSError, RuntimeError, ValueError) as exc:
             logger.error("Vault index sync failed for '%s': %s", vid, exc)
             failed[vid] = str(exc)
     if failed:

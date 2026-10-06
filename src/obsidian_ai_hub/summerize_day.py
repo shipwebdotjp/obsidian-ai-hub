@@ -459,6 +459,7 @@ def summarize_day(target_date: datetime) -> dict:
 
 
 def main(target_date: str | datetime | None = None):
+    config.ensure_vault_registry()
     if target_date is None:
         today = datetime.now()
         target_date = today - timedelta(days=1)

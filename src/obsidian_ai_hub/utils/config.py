@@ -587,6 +587,19 @@ def resolve_vault_ids(vault_ids: list[str] | tuple[str, ...] | None = None) -> l
         resolved.append(VAULT_REGISTRY.get(str(vid)).vault_id)
     return resolved
 
+
+def ensure_vault_registry() -> None:
+    """Fail fast when the Vault Registry is invalid.
+
+    CLI flows that read or write the primary Vault must call this first:
+    without a valid registry the primary paths fall back to the current
+    directory, and files would silently land in the wrong place.
+    """
+    if VAULT_REGISTRY is None:
+        raise VaultValidationError(
+            f"Vault Registry is invalid: {REGISTRY_ERROR or 'unknown error'}"
+        )
+
 # Generic retrieval index (first corpus: approved long-term memories).
 # The embedding model is shared with the Vault index
 # (VAULT_INDEX_EMBEDDER_MODEL); its name is stored as the model fingerprint in
@@ -1447,6 +1460,24 @@ if IS_TEST_ENV:
 else:
     WEB_STATUS_PATH = Path("~/.config/obsidian-ai-hub/web_status.json").expanduser()
     AGENT_SKILLS_PRIMARY_ROOT = Path("~/.agents/skills").expanduser()
+    _skills_dir_raw = _env_or_config(
+        "OBSIDIAN_AI_HUB_SKILLS_DIR", "agent_skills", "root"
+    )
+    if _skills_dir_raw:
+        AGENT_SKILLS_ROOT = Path(str(_skills_dir_raw)).expanduser()
+    else:
+        AGENT_SKILLS_ROOT = Path(
+            "~/.config/obsidian-ai-hub/skills"
+        ).expanduser()
+    _plugins_dir_raw = _env_or_config(
+        "OBSIDIAN_AI_HUB_PLUGINS_DIR", "plugins", "tools_dir"
+    )
+    if _plugins_dir_raw:
+        PLUGINS_TOOLS_DIR = Path(str(_plugins_dir_raw)).expanduser()
+    else:
+        PLUGINS_TOOLS_DIR = Path(
+            "~/.config/obsidian-ai-hub/plugins/tools"
+        ).expanduser()
 
 
 def update_web_status(status: str, error: str | None = None) -> None:
@@ -1466,24 +1497,6 @@ def read_web_status() -> dict:
         return json.loads(WEB_STATUS_PATH.read_text(encoding="utf-8"))
     except Exception as exc:
         return {"status": "unknown", "updated_at": None, "error": str(exc)}
-    _skills_dir_raw = _env_or_config(
-        "OBSIDIAN_AI_HUB_SKILLS_DIR", "agent_skills", "root"
-    )
-    if _skills_dir_raw:
-        AGENT_SKILLS_ROOT = Path(str(_skills_dir_raw)).expanduser()
-    else:
-        AGENT_SKILLS_ROOT = Path(
-            "~/.config/obsidian-ai-hub/skills"
-        ).expanduser()
-    _plugins_dir_raw = _env_or_config(
-        "OBSIDIAN_AI_HUB_PLUGINS_DIR", "plugins", "tools_dir"
-    )
-    if _plugins_dir_raw:
-        PLUGINS_TOOLS_DIR = Path(str(_plugins_dir_raw)).expanduser()
-    else:
-        PLUGINS_TOOLS_DIR = Path(
-            "~/.config/obsidian-ai-hub/plugins/tools"
-        ).expanduser()
 
 
 # Image generation (OpenAI Images API). ``model`` is configurable so a new

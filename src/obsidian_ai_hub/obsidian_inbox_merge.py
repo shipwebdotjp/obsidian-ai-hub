@@ -647,6 +647,7 @@ def process_inbox_file(inbox_file: Path, now: datetime | None = None) -> str:
 
 
 def main() -> dict:
+    config.ensure_vault_registry()
     if not config.INBOX_PATH.exists():
         logger.error("config.INBOX_PATH not found")
         return {"processed": 0, "skipped": 0, "failed": 0, "checked": 0}

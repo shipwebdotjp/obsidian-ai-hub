@@ -60,7 +60,9 @@ cp .env.example .env
 
 ### `config/config.yml` で設定するもの
 
-- `vault` / `files` — Vault 内のフォルダ名とファイル名。
+- `vaults` — Vault のパス（`main` / `blog` / `ai` の絶対パス）。
+- `primary_vault` — 主 Vault（`main`）内のフォルダ名（`inbox` / `daily` / `template` など。`dashboard` は `vault.dashboard` で上書き可）。
+- `files` — ファイル名（日次ノート、週次テンプレート、リサーチ候補テーマリストなど）。
 - `backup.sync_folders` — `--backup` の rsync 対象（source / destination）。
 - `llm.<name>` — 用途ごとの LLM プロバイダ・モデル・プロンプト上書き。
 - `research` — リサーチの既定出力スタイル・文脈収集・ディープリサーチ設定。

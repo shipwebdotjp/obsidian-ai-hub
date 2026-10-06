@@ -93,6 +93,7 @@ def render_copilot_profile() -> list[str]:
         List of updated relative file paths.
     """
     logger.info("Starting copilot profile rendering")
+    config.ensure_vault_registry()
 
     # Get active/valid approved memories
     active_approved, _ = get_currently_valid_approved_memories()
