@@ -613,6 +613,10 @@ export interface WorkflowJobTarget {
   published_revision_id?: string | null;
 }
 
+export interface TaskAgentJobTarget {
+  prompt: string;
+}
+
 export interface DispatchInfo {
   status: string;
   scheduled_for: string;
@@ -626,6 +630,7 @@ export interface RecurringJob {
   schedule: RecurringJobSchedule;
   command?: string | null;
   workflow?: WorkflowJobTarget | null;
+  task_agent?: TaskAgentJobTarget | null;
   is_preset: boolean;
   preset_flag?: string | null;
   preset_name?: string | null;
@@ -661,7 +666,7 @@ export interface SchedulerJobConfigUpdateResponse {
 
 export type RecurringJobUpdate = Pick<
   RecurringJob,
-  "id" | "enabled" | "schedule" | "command" | "workflow" | "agent_source"
+  "id" | "enabled" | "schedule" | "command" | "workflow" | "task_agent" | "agent_source"
 >;
 
 export type OneShotJobStatus =
@@ -675,11 +680,12 @@ export type OneShotJobStatus =
 
 export interface OneShotJobSummary {
   job_id: string;
-  target_kind: "command" | "workflow";
+  target_kind: "command" | "workflow" | "task_agent";
   command?: string | null;
   workflow_id?: string | null;
   inputs: Record<string, unknown>;
   workflow_run_id?: string | null;
+  task_id?: string | null;
   run_at_utc: string;
   status: OneShotJobStatus;
   agent_id?: string | null;

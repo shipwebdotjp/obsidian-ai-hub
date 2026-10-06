@@ -14,7 +14,7 @@ import {
   runRecurringJobNow,
 } from "../../api/client";
 import type { RecurringJob, RecurringJobSchedule, RecurringJobScheduleType, RecurringJobUpdate, CommandSegment, DispatchInfo, OneShotJobSummary, OneShotJobDetail, SchedulableWorkflow } from "../../api/types";
-import { workflowRunPath } from "../../constants/routes";
+import { workflowRunPath, taskAgentDetailPath } from "../../constants/routes";
 import TokenPrompt from "../../components/TokenPrompt";
 import { toRecurringJobUpdate, toRecurringJobUpdates } from "./recurringJobPayload";
 
@@ -35,6 +35,9 @@ function parseJsonObjectInput(raw: string): Record<string, unknown> | null {
 }
 
 function recurringJobTargetLabel(job: RecurringJob): string {
+  if (job.task_agent) {
+    return `Task Agent: ${job.task_agent.prompt}`;
+  }
   if (job.workflow) {
     return `Workflow: ${job.workflow.workflow_name || job.workflow.workflow_id}`;
   }
@@ -51,6 +54,33 @@ function isPendingManualRun(job: OneShotJobSummary): boolean {
   );
 }
 
+function oneShotTaskPrompt(job: OneShotJobSummary): string {
+  const prompt = job.inputs?.prompt;
+  return typeof prompt === "string" && prompt ? prompt : "-";
+}
+
+function renderOneShotTarget(job: OneShotJobSummary) {
+  if (job.target_kind === "workflow") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-800">
+        Workflow: {job.workflow_id}
+      </span>
+    );
+  }
+  if (job.target_kind === "task_agent") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-800">
+        Task Agent: {oneShotTaskPrompt(job)}
+      </span>
+    );
+  }
+  return (
+    <code className="text-xs font-mono text-slate-500 bg-slate-100 px-1 py-0.5 rounded">
+      {job.command}
+    </code>
+  );
+}
+
 function runNowButtonLabel(isActive: boolean, isSubmitting: boolean): string {
   if (isActive) return "実行中";
   if (isSubmitting) return "登録中…";
@@ -59,6 +89,13 @@ function runNowButtonLabel(isActive: boolean, isSubmitting: boolean): string {
 
 function renderRecurringTarget(job: RecurringJob) {
   const label = recurringJobTargetLabel(job);
+  if (job.task_agent) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-800">
+        {label}
+      </span>
+    );
+  }
   if (job.workflow) {
     return (
       <span className="inline-flex items-center gap-1 rounded bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-800">
@@ -103,24 +140,32 @@ function renderLatestDispatch(dispatch: DispatchInfo) {
 }
 
 const PRESET_OPTIONS = [
-  { name: "Inbox merge", flag: "--merge-inbox" },
-  { name: "日サマリ", flag: "--summerize-day" },
-  { name: "週サマリ", flag: "--summerize-week" },
-  { name: "月サマリ", flag: "--summerize-month" },
-  { name: "目標作成", flag: "--make-target" },
-  { name: "今日の予定・タスクを書き込み", flag: "--write-today-schedule" },
+  { name: "Inbox取り込み", flag: "--merge-inbox" },
+  { name: "日次サマリ", flag: "--summerize-day" },
+  { name: "週次サマリ", flag: "--summerize-week" },
+  { name: "月次サマリ", flag: "--summerize-month" },
+  { name: "今日の目標作成", flag: "--make-target" },
+  { name: "今日の予定・タスク書き込み", flag: "--write-today-schedule" },
   { name: "今日の予定通知", flag: "--notify-today-schedule" },
-  { name: "Backup", flag: "--backup" },
-  { name: "Vault sync", flag: "--sync-vault" },
-  { name: "People sync", flag: "--sync-people" },
-  { name: "Knowledge sync", flag: "--sync-knowledge" },
-  { name: "Review draft", flag: "--review-draft" },
-  { name: "Memory extract", flag: "--memory-extract" },
-  { name: "Research suggestion", flag: "--suggest-research-theme" },
+  { name: "バックアップ", flag: "--backup" },
+  { name: "Vault同期", flag: "--sync-vault" },
+  { name: "人物同期", flag: "--sync-people" },
+  { name: "ナレッジ同期", flag: "--sync-knowledge" },
+  { name: "Vault索引再構築", flag: "--rebuild-vault" },
+  { name: "記憶索引再構築", flag: "--rebuild-retrieval-index" },
+  { name: "レビュー下書き作成", flag: "--review-draft" },
+  { name: "記憶候補抽出", flag: "--memory-extract" },
+  { name: "記憶インタビュー生成", flag: "--memory-interview" },
+  { name: "長期記憶メンテナンス", flag: "--memory-maintain" },
+  { name: "Copilotプロファイル生成", flag: "--render-copilot-profile" },
+  { name: "リサーチテーマ提案", flag: "--suggest-research-theme" },
   { name: "AIプランナー提案生成", flag: "--generate-planner-proposals" },
-  { name: "Activity log", flag: "--log-activity" },
-  { name: "HITL dispatch", flag: "--hitl-dispatch" },
-  { name: "LINE Webhook cleanup", flag: "--cleanup-line-webhooks" },
+  { name: "活動ログ記録", flag: "--log-activity" },
+  { name: "LINE取り込みスキャン", flag: "--scan-line-inbox" },
+  { name: "HITL配送", flag: "--hitl-dispatch" },
+  { name: "システムメンテナンス診断", flag: "--system-maintenance" },
+  { name: "LINE記録クリーンアップ", flag: "--cleanup-line-webhooks" },
+  { name: "実行ログクリーンアップ", flag: "--cleanup-execution-logs" },
 ];
 
 export default function JobPage() {
@@ -153,8 +198,9 @@ export default function JobPage() {
   const [previewSegments, setPreviewSegments] = useState<CommandSegment[]>([]);
   const [previewError, setPreviewError] = useState<string | null>(null);
 
-  // Target type (command vs published workflow) and workflow form state
-  const [formTarget, setFormTarget] = useState<"command" | "workflow">("command");
+  // Target type (command vs published workflow vs task agent) and workflow form state
+  const [formTarget, setFormTarget] = useState<"command" | "workflow" | "task_agent">("command");
+  const [formTaskPrompt, setFormTaskPrompt] = useState("");
   const [formWorkflowId, setFormWorkflowId] = useState("");
   const [formWorkflowInputs, setFormWorkflowInputs] = useState("{}");
   const [schedulableWorkflows, setSchedulableWorkflows] = useState<SchedulableWorkflow[]>([]);
@@ -402,10 +448,23 @@ export default function JobPage() {
 
     setSaveError(null);
 
-    if (job.workflow) {
+    if (job.task_agent) {
+      setFormTarget("task_agent");
+      setFormTaskPrompt(job.task_agent.prompt);
+      // Reset the hidden editors so switching the target back cannot
+      // inherit the previously edited job's command or workflow.
+      setFormWorkflowId("");
+      setFormWorkflowInputs("{}");
+      setCommandMode("preset");
+      setFormPresetFlag("--merge-inbox");
+      setFormDetailedCommand("");
+      setPreviewSegments([]);
+      setPreviewError(null);
+    } else if (job.workflow) {
       setFormTarget("workflow");
       setFormWorkflowId(job.workflow.workflow_id);
       setFormWorkflowInputs(JSON.stringify(job.workflow.inputs ?? {}, null, 2));
+      setFormTaskPrompt("");
       // Reset the hidden command editor so switching the target back to
       // コマンド cannot inherit the previously edited job's command.
       setCommandMode("preset");
@@ -417,6 +476,7 @@ export default function JobPage() {
       setFormTarget("command");
       setFormWorkflowId("");
       setFormWorkflowInputs("{}");
+      setFormTaskPrompt("");
       if (job.is_preset && job.preset_flag) {
         setCommandMode("preset");
         setFormPresetFlag(job.preset_flag);
@@ -448,6 +508,7 @@ export default function JobPage() {
     setPreviewError(null);
     setSaveError(null);
     setFormTarget("command");
+    setFormTaskPrompt("");
     setFormWorkflowId(schedulableWorkflows[0]?.workflow_id ?? "");
     setFormWorkflowInputs("{}");
   };
@@ -589,7 +650,14 @@ export default function JobPage() {
       enabled: formEnabled,
       schedule,
     };
-    if (formTarget === "workflow") {
+    if (formTarget === "task_agent") {
+      if (!formTaskPrompt.trim()) {
+        setSaveError("依頼内容は必須です");
+        setSaving(false);
+        return;
+      }
+      newJob.task_agent = { prompt: formTaskPrompt.trim() };
+    } else if (formTarget === "workflow") {
       if (!formWorkflowId) {
         setSaveError("公開された Workflow を選択してください");
         setSaving(false);
@@ -1055,15 +1123,7 @@ export default function JobPage() {
                           : [job.agent_id, job.session_id, job.run_id].filter(Boolean).join(" / ") || "-"}
                       </td>
                       <td className="px-6 py-4 max-w-xs truncate">
-                        {job.target_kind === "workflow" ? (
-                          <span className="inline-flex items-center gap-1 rounded bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-800">
-                            Workflow: {job.workflow_id}
-                          </span>
-                        ) : (
-                          <code className="text-xs font-mono text-slate-500 bg-slate-100 px-1 py-0.5 rounded">
-                            {job.command}
-                          </code>
-                        )}
+                        {renderOneShotTarget(job)}
                       </td>
                       <td className="px-6 py-4 text-xs font-mono text-slate-600">
                         {job.workflow_run_id ? (
@@ -1072,6 +1132,13 @@ export default function JobPage() {
                             className="text-blue-600 underline"
                           >
                             Run
+                          </Link>
+                        ) : job.task_id ? (
+                          <Link
+                            to={taskAgentDetailPath(job.task_id)}
+                            className="text-blue-600 underline"
+                          >
+                            タスク
                           </Link>
                         ) : (
                           job.exit_code ?? "-"
@@ -1375,6 +1442,17 @@ export default function JobPage() {
                   >
                     公開 Workflow
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormTarget("task_agent")}
+                    className={`flex-1 whitespace-nowrap rounded-md py-1.5 text-xs font-medium transition ${
+                      formTarget === "task_agent"
+                        ? "bg-white text-slate-900 shadow-sm"
+                        : "text-slate-500 hover:text-slate-900"
+                    }`}
+                  >
+                    タスクエージェント
+                  </button>
                 </div>
 
                 {formTarget === "workflow" && (
@@ -1420,6 +1498,30 @@ export default function JobPage() {
                       />
                       <p className="mt-1 text-[11px] text-slate-500">
                         入力は平文で設定に保存されます。秘密値を入れないでください。発火時点の最新公開版で検証されます。
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {formTarget === "task_agent" && (
+                  <div className="space-y-3 rounded-xl bg-slate-50 p-4 border border-slate-200">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">
+                        依頼内容
+                      </label>
+                      <textarea
+                        rows={4}
+                        value={formTaskPrompt}
+                        onChange={(e) => setFormTaskPrompt(e.target.value)}
+                        disabled={saving}
+                        placeholder="e.g. 今週の予定を集計してサマリを作る"
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs focus:border-slate-500 focus:outline-none"
+                      />
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        発火のたびに Task が投入され、Web サーバーの Task worker が実行します。依頼文は平文で設定に保存されます。秘密値を入れないでください。
+                      </p>
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        承認が必要な計画は人手の承認待ちで止まります。Web サーバー停止中は Task がキューに残ります。
                       </p>
                     </div>
                   </div>
@@ -1548,7 +1650,8 @@ export default function JobPage() {
                 disabled={
                   saving ||
                   (formTarget === "command" && commandMode === "detailed" && !!previewError) ||
-                  (formTarget === "workflow" && !formWorkflowId)
+                  (formTarget === "workflow" && !formWorkflowId) ||
+                  (formTarget === "task_agent" && !formTaskPrompt.trim())
                 }
                 className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
               >

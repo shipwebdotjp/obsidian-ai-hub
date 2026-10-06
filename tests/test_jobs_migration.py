@@ -335,6 +335,60 @@ def test_corrupt_yaml_surfaces_instead_of_empty(monkeypatch, tmp_path):
         recurring.get_jobs_file_and_revision()
 
 
+def test_db_v79_adds_task_id_to_one_shot_jobs(tmp_path):
+    """v79 records the created Task for dispatched task-agent rows."""
+    import sqlite3
+
+    from obsidian_ai_hub import database
+
+    db_file = tmp_path / "v78.sqlite3"
+    conn = sqlite3.connect(str(db_file))
+    conn.row_factory = sqlite3.Row
+    conn.execute("""
+        CREATE TABLE one_shot_jobs (
+            job_id TEXT PRIMARY KEY,
+            target_kind TEXT NOT NULL DEFAULT 'command',
+            command TEXT,
+            workflow_id TEXT,
+            inputs_json TEXT NOT NULL DEFAULT '{}',
+            workflow_run_id TEXT,
+            run_at_utc TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'queued',
+            agent_id TEXT,
+            session_id TEXT,
+            run_id TEXT,
+            created_at TEXT NOT NULL,
+            started_at TEXT,
+            finished_at TEXT,
+            exit_code INTEGER,
+            segments_json TEXT NOT NULL DEFAULT '[]',
+            output_truncated INTEGER NOT NULL DEFAULT 0,
+            error_summary TEXT,
+            source TEXT NOT NULL DEFAULT 'agent',
+            source_job_id TEXT
+        );
+    """)
+    conn.execute(
+        "INSERT INTO one_shot_jobs (job_id, command, run_at_utc, status,"
+        " created_at, segments_json, output_truncated)"
+        " VALUES ('agent1', 'printf hi', '2026-09-17T00:00:00+00:00', 'succeeded',"
+        " '2026-09-17T00:00:00+00:00', '[]', 0);"
+    )
+    conn.execute("PRAGMA user_version = 78;")
+    conn.commit()
+
+    try:
+        database.run_migration_v79(conn)
+        row = conn.execute("SELECT * FROM one_shot_jobs WHERE job_id = 'agent1'").fetchone()
+        assert row["task_id"] is None
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 79
+
+        conn.execute("UPDATE one_shot_jobs SET task_id = 'task_abc' WHERE job_id = 'agent1'")
+        assert conn.execute("SELECT task_id FROM one_shot_jobs WHERE job_id = 'agent1'").fetchone()[0] == "task_abc"
+    finally:
+        conn.close()
+
+
 def test_frontend_preset_options_match_backend():
     """JobPage preset list must equal backend PRESET_FLAGS (no drift)."""
     import re

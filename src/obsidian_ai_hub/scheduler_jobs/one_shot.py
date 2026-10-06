@@ -31,6 +31,7 @@ DISPATCHED = "dispatched"
 
 TARGET_COMMAND = "command"
 TARGET_WORKFLOW = "workflow"
+TARGET_TASK_AGENT = "task_agent"
 
 SOURCE_AGENT = "agent"
 SOURCE_MANUAL = "manual"
@@ -177,7 +178,54 @@ def register_one_shot_job(
         conn.close()
     result = get_one_shot_job(job_id)
     if result is None:
-        raise RuntimeError(f"Failed to persist one-shot job {job_id}")
+        raise LookupError(f"One-shot job not found: {job_id}")
+    return result
+
+
+def dispatch_claimed_task_agent_job(
+    job: dict, *, now: Optional[datetime] = None
+) -> dict:
+    """Submit a Task Agent request for a claimed (``running``) one-shot job.
+
+    The submission commits in the Task store's own connection while the
+    terminal status update commits here, so a crash between the two leaves a
+    live Task with an ``interrupted`` row (the Task still runs; the row is
+    never re-dispatched). An invalid prompt fails the row instead of spinning
+    it through the queue.
+    """
+    from obsidian_ai_hub.tasks import intake as task_intake
+
+    job_id = job["job_id"]
+    prompt = (job.get("inputs") or {}).get("prompt")
+
+    ref = now or datetime.now(timezone.utc)
+    if ref.tzinfo is None:
+        ref = ref.replace(tzinfo=timezone.utc)
+    finished_at = ref.astimezone(timezone.utc).isoformat()
+
+    conn = get_db_connection()
+    try:
+        with conn:
+            try:
+                receipt = task_intake.submit_request(prompt)
+            except Exception as exc:
+                conn.execute(
+                    "UPDATE one_shot_jobs SET status='failed', finished_at=?,"
+                    " error_summary=? WHERE job_id=? AND status='running'",
+                    (finished_at, f"Task submission failed: {exc}", job_id),
+                )
+            else:
+                conn.execute(
+                    "UPDATE one_shot_jobs SET status='dispatched',"
+                    " task_id=?, finished_at=?, error_summary=NULL"
+                    " WHERE job_id=? AND status='running'",
+                    (receipt.get("task_id"), finished_at, job_id),
+                )
+    finally:
+        conn.close()
+    result = get_one_shot_job(job_id)
+    if result is None:
+        raise LookupError(f"One-shot job not found: {job_id}")
     return result
 
 
@@ -242,7 +290,69 @@ def register_one_shot_workflow_job(
         conn.close()
     result = get_one_shot_job(job_id)
     if result is None:
-        raise RuntimeError(f"Failed to persist one-shot workflow job {job_id}")
+        raise LookupError(f"One-shot job not found: {job_id}")
+    return result
+
+
+def register_one_shot_task_agent_job(
+    prompt: str,
+    run_at: Any = None,
+    *,
+    agent_id: Optional[str] = None,
+    session_id: Optional[str] = None,
+    run_id: Optional[str] = None,
+    source: str = SOURCE_AGENT,
+    source_job_id: Optional[str] = None,
+    now: Optional[datetime] = None,
+) -> dict:
+    """Register a one-shot job that submits a Task Agent request.
+
+    The prompt is validated up front; at execution the runner calls
+    ``tasks.intake.submit_request`` and the row becomes ``dispatched`` with
+    the created Task. The Task's own outcome is tracked on the Task, not here.
+    """
+    if not prompt or not isinstance(prompt, str) or not prompt.strip():
+        raise ValueError("Task prompt must be a non-empty string")
+    source, source_job_id = _normalize_source(source, source_job_id)
+
+    ref = now or datetime.now(timezone.utc)
+    if ref.tzinfo is None:
+        ref = ref.replace(tzinfo=timezone.utc)
+    run_at_utc = parse_run_at(run_at, now=ref)
+    created_at = ref.astimezone(timezone.utc).isoformat()
+    job_id = uuid.uuid4().hex
+
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            """
+            INSERT INTO one_shot_jobs (
+                job_id, target_kind, command, workflow_id, inputs_json,
+                workflow_run_id, task_id, run_at_utc, status, agent_id, session_id,
+                run_id, source, source_job_id,
+                created_at, started_at, finished_at,
+                exit_code, segments_json, output_truncated, error_summary
+            ) VALUES (?, 'task_agent', NULL, NULL, ?, NULL, NULL, ?, 'queued', ?, ?, ?, ?, ?,
+                      ?, NULL, NULL, NULL, '[]', 0, NULL)
+            """,
+            (
+                job_id,
+                json.dumps({"prompt": prompt}, ensure_ascii=False),
+                run_at_utc,
+                agent_id,
+                session_id,
+                run_id,
+                source,
+                source_job_id,
+                created_at,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    result = get_one_shot_job(job_id)
+    if result is None:
+        raise LookupError(f"One-shot job not found: {job_id}")
     return result
 
 
@@ -602,6 +712,8 @@ def run_due_one_shot_jobs(
         try:
             if job.get("target_kind") == TARGET_WORKFLOW:
                 results.append(dispatch_claimed_workflow_job(job, now=now))
+            elif job.get("target_kind") == TARGET_TASK_AGENT:
+                results.append(dispatch_claimed_task_agent_job(job, now=now))
             else:
                 results.append(execute_claimed_job(job, executor=executor, now=now))
         except Exception:

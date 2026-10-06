@@ -49,8 +49,9 @@ def _run_cycle_locked(now: datetime) -> dict:
         job_id = job.get("id")
         schedule = job.get("schedule")
         workflow_target = recurring.get_workflow_target(job)
+        task_agent_target = recurring.get_task_agent_target(job)
         command = job.get("command")
-        if not job_id or not isinstance(schedule, dict) or not (command or workflow_target):
+        if not job_id or not isinstance(schedule, dict) or not (command or workflow_target or task_agent_target):
             logger.warning(
                 "Skipping malformed job entry (missing id/schedule/target): %r", job
             )
@@ -92,6 +93,25 @@ def _run_cycle_locked(now: datetime) -> dict:
                 except Exception:
                     logger.exception(
                         "Workflow job dispatch errored; slot will retry: %s", job_id
+                    )
+                    continue
+            elif task_agent_target is not None:
+                # A Task submission consumes the slot like a workflow dispatch:
+                # the slot is recorded even though the Task itself runs
+                # asynchronously in the Web server's task worker.
+                try:
+                    receipt = recurring.submit_task_agent_slot(
+                        job_id, task_agent_target.get("prompt")
+                    )
+                    logger.info(
+                        "Submitted Task Agent request for job %s: task_id=%s",
+                        job_id,
+                        receipt.get("task_id"),
+                    )
+                except Exception:
+                    logger.exception(
+                        "Recurring task agent job failed (state not updated, will retry): %s",
+                        job_id,
                     )
                     continue
             else:

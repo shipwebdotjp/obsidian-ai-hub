@@ -176,6 +176,18 @@ def test_invalid_command_not_persisted(test_memory_db_path):
     assert items == []
 
 
+def test_invalid_task_agent_prompt_not_persisted(test_memory_db_path):
+    """Blank task-agent prompts are rejected before touching the queue."""
+    with pytest.raises(ValueError):
+        one_shot.register_one_shot_task_agent_job("   ")
+    with pytest.raises(ValueError):
+        one_shot.register_one_shot_task_agent_job("")
+
+    items, total = one_shot.list_one_shot_jobs()
+    assert total == 0
+    assert items == []
+
+
 def test_nonzero_exit_is_failed_with_summary(test_memory_db_path):
     job = one_shot.register_one_shot_job("printf no && printf never")
 

@@ -48,6 +48,29 @@ Web UI の **ジョブ新規追加** / **編集** / **削除** からも管理�
 - 入力は平文で設定に保存されます。**秘密値を入力に含めないでください。**
 - Web UI の **ジョブ新規追加 / 編集** では「コマンド」と「公開 Workflow」を切り替えられます。公開 Workflow は published Revision を持つものだけが選択肢に出ます。
 
+### タスクエージェントを定期実行する
+
+実行対象の3つ目の選択肢として **タスクエージェント** を選べます。発火のたびに
+[Task Agent](task-agent.md) へ依頼文（`task_agent.prompt`）が投入され、Web サーバーの
+Task worker が計画・実行します。
+
+```yaml
+- id: nightly_briefing
+  enabled: true
+  schedule:
+    type: daily
+    hour: 7
+    minute: 0
+  task_agent:
+    prompt: "今週の予定を集計してサマリを作る"
+```
+
+- 依頼文は平文で設定に保存されます。**秘密値を依頼文に含めないでください。**
+- 発火枠は Task の投入成功で消費されます。Task 自体の成否はタスクエージェント画面で確認します。
+- 計画に承認が必要な Capability が含まれると Task は承認待ちで止まります。無人で完走するとは限りません。
+- Web サーバー停止中は Task がキューに残り、実行されません。
+- 定期ジョブ行の **今すぐ実行** も使えます。Task が一度だけ投入され、「ワンショット実行ジョブ」タブに投入記録が残り、作成された Task へのリンクが表示されます。
+
 ### スケジュール
 
 `schedule.type` は `minutely` / `hourly` / `daily` / `weekly` / `monthly` に対応します。

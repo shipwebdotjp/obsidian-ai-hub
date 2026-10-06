@@ -96,7 +96,7 @@ def test_get_recurring_jobs_with_preset_and_custom(clean_job_env, web_client):
     preset_job = next(t for t in body["jobs"] if t["id"] == "job_preset")
     assert preset_job["is_preset"] is True
     assert preset_job["preset_flag"] == "--merge-inbox"
-    assert preset_job["preset_name"] == "Inbox merge"
+    assert preset_job["preset_name"] == "Inbox取り込み"
     assert preset_job["next_run"] is not None
 
     custom_job = next(t for t in body["jobs"] if t["id"] == "job_custom")
@@ -381,6 +381,31 @@ def test_update_recurring_jobs_validation_errors(clean_job_env, web_client):
     res = web_client.put("/api/v1/scheduler-jobs/recurring-jobs", json={"revision": rev, "jobs": invalid_jobs})
     assert res.status_code == 422
 
+    # 5. Mixed targets (command + task_agent)
+    invalid_jobs = [
+        {"id": "t4", "schedule": {"type": "minutely"}, "command": "echo 1", "task_agent": {"prompt": "hi"}}
+    ]
+    res = web_client.put("/api/v1/scheduler-jobs/recurring-jobs", json={"revision": rev, "jobs": invalid_jobs})
+    assert res.status_code == 422
+
+    # 6. Blank task_agent prompt
+    invalid_jobs = [
+        {"id": "t5", "schedule": {"type": "minutely"}, "task_agent": {"prompt": "  "}}
+    ]
+    res = web_client.put("/api/v1/scheduler-jobs/recurring-jobs", json={"revision": rev, "jobs": invalid_jobs})
+    assert res.status_code == 422
+
+    # 7. Valid task_agent target round-trips through the list response.
+    valid_jobs = [
+        {"id": "t6", "schedule": {"type": "daily", "hour": 7}, "task_agent": {"prompt": "Summarize overnight events"}}
+    ]
+    res = web_client.put("/api/v1/scheduler-jobs/recurring-jobs", json={"revision": rev, "jobs": valid_jobs})
+    assert res.status_code == 200, res.text
+    listed = web_client.get("/api/v1/scheduler-jobs/recurring-jobs").json()["jobs"]
+    assert listed[0]["task_agent"] == {"prompt": "Summarize overnight events"}
+    assert listed[0]["command"] is None
+    assert listed[0]["workflow"] is None
+
 
 def test_preview_command_success(web_client):
     res = web_client.post("/api/v1/scheduler-jobs/preview", json={
@@ -402,7 +427,7 @@ def test_preview_command_preset(web_client):
     body = res.json()
     assert body["is_preset"] is True
     assert body["preset_flag"] == "--merge-inbox"
-    assert body["preset_name"] == "Inbox merge"
+    assert body["preset_name"] == "Inbox取り込み"
 
 
 def test_preview_command_error(web_client):
@@ -726,6 +751,65 @@ def test_run_recurring_job_now_workflow_scenario(
     assert [j["job_id"] for j in finished] == [body["job_id"]]
     assert finished[0]["status"] == "dispatched"
     assert finished[0]["workflow_run_id"]
+
+
+def test_run_recurring_job_now_task_agent_scenario(
+    clean_job_env, web_client, test_memory_db_path, monkeypatch
+):
+    """Recurring task_agent job -> run-now -> queued manual row -> dispatch.
+
+    The operation-scenario contract for the new target type: the prompt is
+    resolved from the current YAML (never from the client), the schedule
+    state is untouched, duplicates are refused, and the runner submits one
+    Task and records its id on the dispatched row.
+    """
+    from obsidian_ai_hub import job_runner
+    from obsidian_ai_hub.scheduler_jobs import one_shot
+    from obsidian_ai_hub.tasks import store as task_store
+
+    job_file, _ = clean_job_env
+    prompt = "Summarize overnight events && then report"
+    recurring.atomic_write_yaml(
+        job_file,
+        [
+            {
+                "id": "job_ta",
+                "enabled": False,
+                "schedule": {"type": "daily", "hour": 3, "minute": 0},
+                "task_agent": {"prompt": prompt},
+            }
+        ],
+    )
+    monkeypatch.setattr(job_runner, "spawn_cycle_process", lambda: None)
+
+    res = web_client.post("/api/v1/scheduler-jobs/recurring-jobs/job_ta/run")
+    assert res.status_code == 201, res.text
+    body = res.json()
+    assert body["target_kind"] == "task_agent"
+    assert body["inputs"] == {"prompt": prompt}
+    assert body["status"] == "queued"
+    assert body["source"] == "manual"
+    assert body["source_job_id"] == "job_ta"
+
+    # The list response exposes the task_agent target for editing.
+    listed = web_client.get("/api/v1/scheduler-jobs/recurring-jobs").json()["jobs"]
+    assert next(j for j in listed if j["id"] == "job_ta")["task_agent"] == {"prompt": prompt}
+
+    res = web_client.post("/api/v1/scheduler-jobs/recurring-jobs/job_ta/run")
+    assert res.status_code == 409
+
+    # Manual runs do not touch the recurring job's arming/last_run state.
+    assert recurring.load_state() == {}
+
+    # The runner submits one Task and links it on the dispatched row.
+    finished = one_shot.run_due_one_shot_jobs()
+    assert [j["job_id"] for j in finished] == [body["job_id"]]
+    assert finished[0]["status"] == "dispatched"
+    assert finished[0]["task_id"]
+    task = task_store.get_task(finished[0]["task_id"])
+    assert task is not None
+    assert task["prompt_text"] == prompt
+    assert task["status"] == "queued"
 
 
 def test_run_recurring_job_now_errors(

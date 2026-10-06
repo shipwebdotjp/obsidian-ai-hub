@@ -480,6 +480,77 @@ def test_merge_preserves_unknown_and_revokes_on_meaning_change():
     assert "agent_source" not in merged[0]
 
 
+def test_task_agent_job_submits_task_once_per_slot(isolated_jobs):
+    """YAML task_agent job -> runner submits one Task per due slot (real store).
+
+    The downstream contract for the new target type: the prompt is submitted
+    verbatim (shell metacharacters must survive), the slot is consumed, and a
+    later cycle in the same slot does not resubmit.
+    """
+    from obsidian_ai_hub.tasks import store as task_store
+
+    job_file, _ = isolated_jobs
+    prompt = "Summarize overnight events && then report"
+    recurring.atomic_write_yaml(job_file, [
+        {
+            "id": "ta_daily",
+            "enabled": True,
+            "schedule": {"type": "daily", "hour": 7, "minute": 0},
+            "task_agent": {"prompt": prompt},
+        }
+    ])
+    recurring.save_state({"ta_daily": datetime(2026, 9, 17, 0, 0, 0)})
+
+    now = datetime(2026, 9, 17, 7, 0, 5)
+    result = job_runner.run_cycle(now=now)
+    assert result["recurring"] == ["ta_daily"]
+    assert recurring.load_state()["ta_daily"] == now
+
+    assert task_store.count_tasks() == 1
+    (task,) = task_store.list_tasks()
+    assert task["prompt_text"] == prompt
+    assert task["status"] == "queued"
+
+    # A later cycle in the same slot must not resubmit.
+    result = job_runner.run_cycle(now=datetime(2026, 9, 17, 7, 0, 40))
+    assert result["recurring"] == []
+    assert task_store.count_tasks() == 1
+
+
+def test_merge_task_agent_switch_prunes_stale_target():
+    """Switching a job to task_agent drops the old target and revokes ownership.
+
+    A stale command/workflow left behind a task_agent edit would change what
+    the runner executes, so the merge must prune the previous target and
+    treat the switch as a meaningful change.
+    """
+    current = [
+        {
+            "id": "agent_job",
+            "enabled": True,
+            "schedule": {"type": "daily", "hour": 7},
+            "command": "printf old",
+            "note": "hand written",
+            "agent_source": {"agent_id": "a", "session_id": "s"},
+        },
+    ]
+    incoming = [
+        {
+            "id": "agent_job",
+            "enabled": True,
+            "schedule": {"type": "daily", "hour": 7},
+            "task_agent": {"prompt": "Summarize overnight events"},
+        },
+    ]
+    (merged,) = recurring.merge_recurring_jobs(current, incoming)
+    assert merged["task_agent"] == {"prompt": "Summarize overnight events"}
+    assert "command" not in merged
+    assert "workflow" not in merged
+    assert "agent_source" not in merged
+    assert merged["note"] == "hand written"
+    recurring.validate_jobs([merged])
+
+
 def test_task_capability_boundary():
     from obsidian_ai_hub.tasks.capabilities import (
         EXCLUDED_TOOL_IDS,

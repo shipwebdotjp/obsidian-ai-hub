@@ -793,6 +793,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 77:
         run_migration_v78(conn)
 
+    if current_version <= 78:
+        run_migration_v79(conn)
+
     return conn
 
 
@@ -1903,6 +1906,21 @@ def run_migration_v78(conn: sqlite3.Connection) -> None:
     except sqlite3.OperationalError as e:
         _ignore_duplicate_schema_object(e)
     conn.execute("PRAGMA user_version = 78;")
+    conn.commit()
+
+
+def run_migration_v79(conn: sqlite3.Connection) -> None:
+    """Run migration for version 79 (one-shot Task Agent target).
+
+    Adds ``one_shot_jobs.task_id``: the created Task for a dispatched
+    ``target_kind='task_agent'`` row, mirroring ``workflow_run_id`` for
+    workflow rows. Existing rows backfill to NULL.
+    """
+    try:
+        conn.execute("ALTER TABLE one_shot_jobs ADD COLUMN task_id TEXT;")
+    except sqlite3.OperationalError as e:
+        _ignore_duplicate_schema_object(e)
+    conn.execute("PRAGMA user_version = 79;")
     conn.commit()
 
 

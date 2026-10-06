@@ -64,4 +64,19 @@ describe("recurringJobPayload", () => {
     expect(payload).not.toHaveProperty("command");
     expect(payload.agent_source?.agent_id).toBe("agent-2");
   });
+
+  it("sends only the task_agent target for a task agent job", () => {
+    const job: RecurringJob = {
+      id: "ta_job",
+      enabled: true,
+      schedule: { type: "daily", hour: 7 },
+      command: "printf stale",
+      task_agent: { prompt: "Summarize overnight events" },
+      is_preset: false,
+    };
+    const payload = toRecurringJobUpdate(job);
+    expect(payload.task_agent).toEqual({ prompt: "Summarize overnight events" });
+    expect(payload).not.toHaveProperty("command");
+    expect(payload).not.toHaveProperty("workflow");
+  });
 });

@@ -9,9 +9,12 @@ export const toRecurringJobUpdate = (job: RecurringJob): RecurringJobUpdate => {
     enabled: job.enabled,
     schedule: job.schedule,
   };
-  // command and workflow are exclusive targets; send only the one in use so a
-  // workflow job's payload never carries a stale command (and vice versa).
-  if (job.workflow) {
+  // command, workflow, and task_agent are exclusive targets; send only the
+  // one in use so a workflow job's payload never carries a stale command
+  // (and vice versa).
+  if (job.task_agent) {
+    payload.task_agent = { prompt: job.task_agent.prompt };
+  } else if (job.workflow) {
     payload.workflow = {
       workflow_id: job.workflow.workflow_id,
       inputs: job.workflow.inputs ?? {},

@@ -45,11 +45,24 @@ def _workflow_item(target: dict) -> Optional[dict]:
     }
 
 
+def _task_agent_item(target: dict) -> Optional[dict]:
+    """Build the response target, or None when the raw YAML is unusable.
+
+    A hand-edited ``task_agent:`` mapping without a non-empty ``prompt``
+    must not fail the whole list response.
+    """
+    prompt = target.get("prompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        return None
+    return {"prompt": prompt}
+
+
 def get_recurring_jobs() -> dict:
     from obsidian_ai_hub.scheduler_jobs.recurring import (
         get_jobs_file_and_revision_locked,
         get_command_preset_info,
         get_agent_source,
+        get_task_agent_target,
         get_workflow_target,
         compute_next_target,
     )
@@ -70,6 +83,7 @@ def get_recurring_jobs() -> dict:
     for t in jobs:
         command = t.get("command")
         workflow_target = get_workflow_target(t)
+        task_agent_target = get_task_agent_target(t)
         preset_info = (
             get_command_preset_info(command)
             if command
@@ -90,6 +104,7 @@ def get_recurring_jobs() -> dict:
             "schedule": t.get("schedule"),
             "command": command,
             "workflow": _workflow_item(workflow_target) if workflow_target else None,
+            "task_agent": _task_agent_item(task_agent_target) if task_agent_target else None,
             "is_preset": preset_info["is_preset"],
             "preset_flag": preset_info["flag"],
             "preset_name": preset_info["name"],
@@ -183,6 +198,7 @@ def run_recurring_job_now(job_id: str) -> dict:
     from obsidian_ai_hub.scheduler_jobs import one_shot
     from obsidian_ai_hub.scheduler_jobs.recurring import (
         get_jobs_file_and_revision_locked,
+        get_task_agent_target,
         get_workflow_target,
     )
 
@@ -198,11 +214,19 @@ def run_recurring_job_now(job_id: str) -> dict:
         raise ManualRunConflictError()
 
     workflow_target = get_workflow_target(job)
+    task_agent_target = get_task_agent_target(job)
     try:
         if workflow_target is not None:
             row = one_shot.register_one_shot_workflow_job(
                 workflow_target.get("workflow_id"),
                 workflow_target.get("inputs") or {},
+                run_at=None,
+                source=one_shot.SOURCE_MANUAL,
+                source_job_id=job_id,
+            )
+        elif task_agent_target is not None:
+            row = one_shot.register_one_shot_task_agent_job(
+                task_agent_target.get("prompt"),
                 run_at=None,
                 source=one_shot.SOURCE_MANUAL,
                 source_job_id=job_id,
@@ -216,7 +240,7 @@ def run_recurring_job_now(job_id: str) -> dict:
             )
         else:
             raise ValueError(
-                f"定期ジョブ '{job_id}' に実行対象（command / workflow）がありません"
+                f"定期ジョブ '{job_id}' に実行対象（command / workflow / task_agent）がありません"
             )
     except sqlite3.IntegrityError as e:
         # Race-safe backstop: the partial unique index rejects a concurrent

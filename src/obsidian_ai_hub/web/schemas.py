@@ -1067,6 +1067,10 @@ class WorkflowJobTarget(BaseModel):
     published_revision_id: Optional[str] = None
 
 
+class TaskAgentJobTarget(BaseModel):
+    prompt: str
+
+
 class DispatchInfo(BaseModel):
     status: str
     scheduled_for: str
@@ -1080,6 +1084,7 @@ class RecurringJob(BaseModel):
     schedule: dict
     command: Optional[str] = None
     workflow: Optional[WorkflowJobTarget] = None
+    task_agent: Optional[TaskAgentJobTarget] = None
     is_preset: bool = False
     preset_flag: Optional[str] = None
     preset_name: Optional[str] = None
@@ -1228,6 +1233,7 @@ class OneShotJobSummary(BaseModel):
     workflow_id: Optional[str] = None
     inputs: dict = {}
     workflow_run_id: Optional[str] = None
+    task_id: Optional[str] = None
     run_at_utc: str
     status: str
     agent_id: Optional[str] = None

@@ -61,24 +61,32 @@ MIGRATION_GUIDANCE = (
 )
 
 PRESET_FLAGS = {
-    "--merge-inbox": "Inbox merge",
-    "--summerize-day": "日サマリ",
-    "--summerize-week": "週サマリ",
-    "--summerize-month": "月サマリ",
-    "--make-target": "目標作成",
-    "--write-today-schedule": "今日の予定・タスクを書き込み",
+    "--merge-inbox": "Inbox取り込み",
+    "--summerize-day": "日次サマリ",
+    "--summerize-week": "週次サマリ",
+    "--summerize-month": "月次サマリ",
+    "--make-target": "今日の目標作成",
+    "--write-today-schedule": "今日の予定・タスク書き込み",
     "--notify-today-schedule": "今日の予定通知",
-    "--backup": "Backup",
-    "--sync-vault": "Vault sync",
-    "--sync-people": "People sync",
-    "--sync-knowledge": "Knowledge sync",
-    "--review-draft": "Review draft",
-    "--memory-extract": "Memory extract",
-    "--suggest-research-theme": "Research suggestion",
+    "--backup": "バックアップ",
+    "--sync-vault": "Vault同期",
+    "--sync-people": "人物同期",
+    "--sync-knowledge": "ナレッジ同期",
+    "--rebuild-vault": "Vault索引再構築",
+    "--rebuild-retrieval-index": "記憶索引再構築",
+    "--review-draft": "レビュー下書き作成",
+    "--memory-extract": "記憶候補抽出",
+    "--memory-interview": "記憶インタビュー生成",
+    "--memory-maintain": "長期記憶メンテナンス",
+    "--render-copilot-profile": "Copilotプロファイル生成",
+    "--suggest-research-theme": "リサーチテーマ提案",
     "--generate-planner-proposals": "AIプランナー提案生成",
-    "--log-activity": "Activity log",
-    "--hitl-dispatch": "HITL dispatch",
-    "--cleanup-line-webhooks": "LINE Webhook cleanup",
+    "--log-activity": "活動ログ記録",
+    "--scan-line-inbox": "LINE取り込みスキャン",
+    "--hitl-dispatch": "HITL配送",
+    "--system-maintenance": "システムメンテナンス診断",
+    "--cleanup-line-webhooks": "LINE記録クリーンアップ",
+    "--cleanup-execution-logs": "実行ログクリーンアップ",
 }
 
 
@@ -436,6 +444,16 @@ def get_workflow_target(job: dict) -> Optional[dict]:
     return target
 
 
+def get_task_agent_target(job: dict) -> Optional[dict]:
+    """Return ``{"prompt"}`` for a Task Agent job, else None."""
+    if not isinstance(job, dict):
+        return None
+    target = job.get("task_agent")
+    if not isinstance(target, dict):
+        return None
+    return target
+
+
 def validate_workflow_target(workflow_id, inputs) -> dict:
     """Structurally validate a workflow target and check it against the DB.
 
@@ -496,10 +514,21 @@ def validate_jobs(jobs: list) -> None:
 
         has_command = bool(job.get("command"))
         has_workflow = job.get("workflow") is not None
-        if has_command and has_workflow:
+        has_task_agent = job.get("task_agent") is not None
+        if sum((has_command, has_workflow, has_task_agent)) > 1:
             raise ValueError(
-                f"Job '{job_id}': command と workflow は同時に指定できません"
+                f"Job '{job_id}': command、workflow、task_agent は同時に指定できません"
             )
+        if has_task_agent:
+            target = get_task_agent_target(job)
+            if target is None:
+                raise ValueError(f"Job '{job_id}': task_agent must be a dictionary")
+            prompt = target.get("prompt")
+            if not isinstance(prompt, str) or not prompt.strip():
+                raise ValueError(
+                    f"Job '{job_id}': task_agent.prompt must be a non-empty string"
+                )
+            continue
         if has_workflow:
             target = get_workflow_target(job)
             if target is None:
@@ -590,6 +619,8 @@ def save_jobs_and_arm(new_jobs: list, old_jobs: list, now: datetime):
             if old_job.get("command") != job.get("command"):
                 need_arm = True
             if (old_job.get("workflow") or None) != (job.get("workflow") or None):
+                need_arm = True
+            if (old_job.get("task_agent") or None) != (job.get("task_agent") or None):
                 need_arm = True
 
         if need_arm:
@@ -808,6 +839,8 @@ def _job_meaning_changed(old: dict, new: dict) -> bool:
         return True
     if (old.get("workflow") or None) != (new.get("workflow") or None):
         return True
+    if (old.get("task_agent") or None) != (new.get("task_agent") or None):
+        return True
     if bool(old.get("enabled", True)) != bool(new.get("enabled", True)):
         return True
     try:
@@ -844,13 +877,18 @@ def merge_recurring_jobs(current_jobs: list, incoming_jobs: list) -> list:
         if job_id in current_by_id:
             base = dict(current_by_id[job_id])
             changed = _job_meaning_changed(base, incoming)
-            for key in ("enabled", "schedule", "command", "workflow"):
+            for key in ("enabled", "schedule", "command", "workflow", "task_agent"):
                 if key in incoming:
                     base[key] = incoming[key]
-            if "workflow" in incoming:
+            if "task_agent" in incoming:
                 base.pop("command", None)
+                base.pop("workflow", None)
+            elif "workflow" in incoming:
+                base.pop("command", None)
+                base.pop("task_agent", None)
             elif "command" in incoming:
                 base.pop("workflow", None)
+                base.pop("task_agent", None)
             base["id"] = job_id
             if changed:
                 base.pop(AGENT_SOURCE_FIELD, None)
@@ -888,6 +926,39 @@ def run_command(command):
             continue
 
         subprocess.run(parts, cwd=cwd, check=False)
+
+
+def submit_task_agent_slot(job_id: str, prompt: str) -> dict:
+    """Submit a Task Agent request for one recurring slot and return the receipt.
+
+    The submission is submitted in-process (no shell, no subprocess) via
+    ``tasks.intake.submit_request``, so prompts need no quoting and may contain
+    ``&&``. Each submission is recorded as a ``task_agent`` command run for the
+    same audit trail other recurring jobs get from their CLI invocation.
+    Raises on failure without consuming the slot so the runner retries it.
+    """
+    import uuid
+
+    from obsidian_ai_hub.tasks import intake as task_intake
+    from obsidian_ai_hub.utils import execution_logger
+
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise ValueError("task_agent.prompt must be a non-empty string")
+    run_id = str(uuid.uuid4())
+    token = execution_logger.current_run_id.set(run_id)
+    execution_logger.start_command_run(
+        run_id, "task_agent", {"scheduler_job_id": job_id, "prompt_length": len(prompt)}
+    )
+    try:
+        receipt = task_intake.submit_request(prompt)
+        execution_logger.succeed_command_run(run_id, receipt)
+        return receipt
+    except BaseException as e:
+        execution_logger.fail_command_run(run_id, e)
+        raise
+    finally:
+        execution_logger.finalize_command_run_unless_terminal(run_id)
+        execution_logger.current_run_id.reset(token)
 
 
 def migrate_tasks_yaml_to_jobs(base_dir: Optional[Path] = None) -> Path:

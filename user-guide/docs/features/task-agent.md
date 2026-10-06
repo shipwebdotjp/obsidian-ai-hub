@@ -19,6 +19,9 @@ uv run -m obsidian_ai_hub --task-agent "Summarize this week's schedule"
 
 Web UI の **タスクエージェント** 画面（`/task-agent`）では、**新規作成** から依頼を投入できます。
 
+同じ依頼を繰り返し実行したい場合は、[ジョブ管理](jobs.md#タスクエージェントを定期実行する)で
+タスクエージェントを対象にした定期実行ジョブを作れます。
+
 :::note[Workflow の実行は一覧に表示されません]
 Workflow の Capability Node 実行は、内部の子 Run 連携・取消・監査のために短命の内部
 Task（origin `workflow`）を使います。これは依頼した Task ではないため、Task Agent の
