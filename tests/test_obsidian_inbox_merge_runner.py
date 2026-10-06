@@ -42,12 +42,9 @@ def test_process_inbox_file_processes_stale_markdown(tmp_path: Path):
     inbox_file = inbox / "note.md"
     inbox_file.write_text("hello", encoding="utf-8")
 
-    daily_template = (
-        tmp_path / "vault" / obsidian_inbox_merge.config.DAILY_DIR_NAME
-        / obsidian_inbox_merge.config.TEMPLATE_DIR_NAME
-        / obsidian_inbox_merge.config.DAILY_TEMPLATE_FILENAME
-    )
-    _create_template(daily_template)
+    # The sandbox configures TEMPLATE_PATH (vaults/main/...); follow it
+    # instead of reconstructing the path so the app finds the template.
+    _create_template(obsidian_inbox_merge.config.TEMPLATE_PATH)
 
     fixed_now = datetime(2026, 8, 19, 10, 0, 0)
     _set_mtime(inbox_file, fixed_now - timedelta(seconds=INBOX_FRESH_GRACE_SECONDS + 1))
@@ -89,12 +86,7 @@ def test_process_inbox_file_read_failure_keeps_file(tmp_path: Path):
     inbox_file = inbox / "note.md"
     inbox_file.write_text("body", encoding="utf-8")
 
-    daily_template = (
-        tmp_path / "vault" / obsidian_inbox_merge.config.DAILY_DIR_NAME
-        / obsidian_inbox_merge.config.TEMPLATE_DIR_NAME
-        / obsidian_inbox_merge.config.DAILY_TEMPLATE_FILENAME
-    )
-    _create_template(daily_template)
+    _create_template(obsidian_inbox_merge.config.TEMPLATE_PATH)
 
     fixed_now = datetime(2026, 8, 19, 10, 0, 0)
     _set_mtime(inbox_file, fixed_now - timedelta(seconds=60))
