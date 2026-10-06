@@ -55,6 +55,21 @@ def _setup_mock_coding(monkeypatch, repo_path, orch_text="report content"):
     from obsidian_ai_hub.utils import config as app_config
     from obsidian_ai_hub.web.services import vault as vault_service
 
+    registry = app_config.validate_vault_registry(
+        {
+            "vaults": {
+                "main": {
+                    "path": str(repo_path),
+                    "display_name": "Test Personal",
+                    "role": "primary",
+                    "ai_access": "read",
+                },
+            }
+        }
+    )
+    monkeypatch.setattr(app_config, "VAULT_REGISTRY", registry)
+    monkeypatch.setattr(app_config, "PRIMARY_VAULT", registry.get_primary())
+    monkeypatch.setattr(app_config, "PRIMARY_VAULT_PATH", repo_path)
     monkeypatch.setattr(app_config, "VAULT_PATH", repo_path)
     # ``write_vault_file`` reads the config object it imported; patch that
     # exact object too so the write lands where the assertion looks, even if

@@ -372,6 +372,7 @@ class VaultSearchHitMetadata(BaseModel):
     source_path: Optional[str] = None
     file_path: Optional[str] = None
     relative_path: Optional[str] = None
+    vault_id: Optional[str] = None
     vault_name: Optional[str] = None
     chunk_index: Optional[int] = None
     mtime: Optional[float] = None
@@ -392,10 +393,12 @@ class VaultSearchResponse(BaseModel):
 class VaultFileResponse(BaseModel):
     content: str
     relative_path: str
+    vault_id: Optional[str] = None
     vault_name: str
 
 
 class VaultFileListItem(BaseModel):
+    vault_id: Optional[str] = None
     relative_path: str
     size: int
     mtime: float
@@ -403,6 +406,17 @@ class VaultFileListItem(BaseModel):
 
 class VaultFilesResponse(BaseModel):
     items: list[VaultFileListItem]
+    total: int
+
+
+class VaultInfo(BaseModel):
+    vault_id: str
+    display_name: str
+    is_primary: bool = False
+
+
+class VaultListResponse(BaseModel):
+    items: list[VaultInfo]
     total: int
 
 

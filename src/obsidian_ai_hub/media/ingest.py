@@ -39,7 +39,7 @@ _MAX_INPUT_PIXELS = 40_000_000
 def _configured_roots() -> list[Path]:
     roots: list[Path] = []
     for raw in (
-        getattr(config, "VAULT_PATH", None),
+        getattr(config, "PRIMARY_VAULT_PATH", None),
         getattr(config, "IMAGE_GENERATION_OUTPUT_DIR", None),
         getattr(config, "IMAGE_GENERATION_INPUT_DIR", None),
     ):

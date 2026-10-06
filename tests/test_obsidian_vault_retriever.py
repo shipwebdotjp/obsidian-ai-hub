@@ -35,7 +35,7 @@ class FakeIndexFactory:
     def __init__(self):
         self.index = None
 
-    def __call__(self):
+    def __call__(self, *args, **kwargs):
         self.index = ThreadBoundFakeIndex()
         return self.index
 
@@ -48,7 +48,7 @@ def _assert_no_error(payload: str):
 
 def test_search_from_multiple_caller_threads_stays_on_worker_thread(monkeypatch):
     factory = FakeIndexFactory()
-    monkeypatch.setattr(retriever, "_vault_index", None)
+    monkeypatch.setattr(retriever, "_vault_indexes", {})
     monkeypatch.setattr(retriever, "build_vault_search_index", factory)
 
     caller_threads = set()
@@ -87,13 +87,17 @@ def test_search_result_formatting(monkeypatch):
         return [hit]
 
     factory = FakeIndexFactory()
-    monkeypatch.setattr(retriever, "_vault_index", None)
+    monkeypatch.setattr(retriever, "_vault_indexes", {})
     monkeypatch.setattr(retriever, "build_vault_search_index", factory)
     monkeypatch.setattr(ThreadBoundFakeIndex, "search", search_with_hit)
 
     data = _assert_no_error(retriever._search_obsidian_vault_core_sync("q", k=3))
     assert data == [
-        {"content": "本文", "metadata": {"file_path": "a.md"}, "score": 0.9}
+        {
+            "content": "本文",
+            "metadata": {"file_path": "a.md", "vault_id": "main"},
+            "score": 0.9,
+        }
     ]
 
 
@@ -102,8 +106,8 @@ def test_search_error_returns_error_json(monkeypatch):
         raise RuntimeError("boom")
 
     bad_index = SimpleNamespace(search=boom)
-    monkeypatch.setattr(retriever, "_vault_index", None)
-    monkeypatch.setattr(retriever, "build_vault_search_index", lambda: bad_index)
+    monkeypatch.setattr(retriever, "_vault_indexes", {})
+    monkeypatch.setattr(retriever, "build_vault_search_index", lambda *a, **k: bad_index)
 
     data = json.loads(retriever._search_obsidian_vault_core_sync("q"))
     assert data == {"error": "Unexpected error: RuntimeError: boom"}

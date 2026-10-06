@@ -250,13 +250,13 @@ def estimate_tokens(text: str) -> int:
 
 
 def get_approved_memories_path() -> Path:
-    vault_copilot = Path(config.VAULT_PATH) / "copilot"
+    vault_copilot = Path(config.PRIMARY_VAULT_PATH) / "copilot"
     return vault_copilot / "memory" / "approved.md"
 
 
 def _vault_relative_path(path: Path) -> str:
     try:
-        return path.relative_to(config.VAULT_PATH).as_posix()
+        return path.relative_to(config.PRIMARY_VAULT_PATH).as_posix()
     except ValueError:
         return path.as_posix()
 

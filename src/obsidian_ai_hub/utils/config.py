@@ -529,6 +529,64 @@ if isinstance(VAULT_INDEX_ALLOW_NETWORK_FALLBACK, str):
         "on",
     )
 
+
+class VaultIndexStaleError(ValueError):
+    """Raised when a vault's stored index was built for a different path."""
+
+    pass
+
+
+def vault_index_base_dir() -> Path:
+    """Return the base directory holding per-vault index subdirectories.
+
+    Derived from ``VAULT_INDEX_SQLITE_PATH`` so existing single-vault
+    deployments keep their configured location as the parent:
+    ``<base>/<vault_id>/search.sqlite`` and ``<base>/<vault_id>/chroma``.
+    """
+    sqlite = Path(str(VAULT_INDEX_SQLITE_PATH)).expanduser()
+    return sqlite.parent
+
+
+def vault_index_paths(vault_id: str) -> tuple[Path, Path]:
+    """Return ``(sqlite_path, chroma_path)`` for *vault_id*."""
+    base = vault_index_base_dir()
+    return (base / vault_id / "search.sqlite", base / vault_id / "chroma")
+
+
+def vault_index_identity_path(vault_id: str) -> Path:
+    """Return the identity sidecar path recording which Vault path built an index."""
+    base = vault_index_base_dir()
+    return base / vault_id / "vault_identity.json"
+
+
+def resolve_vault_descriptor(vault_id: str | None = None) -> VaultDescriptor:
+    """Resolve a Vault descriptor from the registry.
+
+    ``None`` resolves to the primary Vault. Raises ``VaultValidationError``
+    when the registry is unavailable and ``KeyError`` for unknown IDs.
+    """
+    if VAULT_REGISTRY is None:
+        raise VaultValidationError(
+            f"Vault Registry is unavailable: {REGISTRY_ERROR or 'unknown error'}"
+        )
+    if vault_id is None:
+        return VAULT_REGISTRY.get_primary()
+    return VAULT_REGISTRY.get(str(vault_id))
+
+
+def resolve_vault_ids(vault_ids: list[str] | tuple[str, ...] | None = None) -> list[str]:
+    """Resolve requested Vault IDs, defaulting to all registry IDs in sorted order."""
+    if VAULT_REGISTRY is None:
+        raise VaultValidationError(
+            f"Vault Registry is unavailable: {REGISTRY_ERROR or 'unknown error'}"
+        )
+    if vault_ids is None:
+        return sorted(v.vault_id for v in VAULT_REGISTRY.list_vaults())
+    resolved: list[str] = []
+    for vid in vault_ids:
+        resolved.append(VAULT_REGISTRY.get(str(vid)).vault_id)
+    return resolved
+
 # Generic retrieval index (first corpus: approved long-term memories).
 # The embedding model is shared with the Vault index
 # (VAULT_INDEX_EMBEDDER_MODEL); its name is stored as the model fingerprint in

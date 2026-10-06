@@ -13,7 +13,9 @@ def test_main_exits_on_config_mismatch(monkeypatch):
         def sync(self):
             raise FakeConfigMismatchError("configuration mismatch")
 
-    monkeypatch.setattr(sync_valut, "build_vault_search_index", lambda: FakeIndex())
+    monkeypatch.setattr(
+        sync_valut, "build_vault_search_index", lambda *a, **k: FakeIndex()
+    )
     monkeypatch.setattr(
         sync_valut, "ConfigMismatchError", FakeConfigMismatchError, raising=False
     )

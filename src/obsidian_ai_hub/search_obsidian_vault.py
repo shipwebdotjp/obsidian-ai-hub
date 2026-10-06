@@ -7,12 +7,26 @@ from obsidian_ai_hub.handler.obsidian_vault_retriever import (
 
 
 def main(
-    query: str, k: int = 10, search_mode: str = "hybrid", json_output: bool = False
+    query: str,
+    k: int = 10,
+    search_mode: str = "hybrid",
+    json_output: bool = False,
+    vault_ids: list[str] | None = None,
 ):
     """
-    CLI wrapper for searching the Obsidian vault.
+    CLI wrapper for searching the Obsidian vaults.
     """
-    result_json = retriever.func(query=query, k=int(k), search_mode=search_mode)
+    from obsidian_ai_hub.web.services import vault as vault_service
+
+    if vault_ids is not None:
+        result = vault_service.search_vault(
+            q=query, k=int(k), mode=search_mode, vault_ids=vault_ids
+        )
+        import json as _json
+
+        result_json = _json.dumps(result["items"], ensure_ascii=False)
+    else:
+        result_json = retriever.func(query=query, k=int(k), search_mode=search_mode)
 
     if json_output:
         # result_json is already a JSON string from the retriever

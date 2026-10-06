@@ -34,6 +34,21 @@ def vault_dir(monkeypatch, tmp_path):
     hidden = vault / ".obsidian"
     hidden.mkdir()
     (hidden / "hidden.md").write_text("hidden", encoding="utf-8")
+    registry = config.validate_vault_registry(
+        {
+            "vaults": {
+                "main": {
+                    "path": str(vault),
+                    "display_name": "Test Personal",
+                    "role": "primary",
+                    "ai_access": "read",
+                },
+            }
+        }
+    )
+    monkeypatch.setattr(config, "VAULT_REGISTRY", registry)
+    monkeypatch.setattr(config, "PRIMARY_VAULT", registry.get_primary())
+    monkeypatch.setattr(config, "PRIMARY_VAULT_PATH", vault)
     monkeypatch.setattr(config, "VAULT_PATH", vault)
     return vault
 

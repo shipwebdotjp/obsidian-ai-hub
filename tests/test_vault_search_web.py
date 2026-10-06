@@ -13,6 +13,21 @@ def loopback_client(monkeypatch, tmp_path, api_token, api_auth_headers):
 
     vault_path = tmp_path / "vault"
     vault_path.mkdir(exist_ok=True)
+    registry = config.validate_vault_registry(
+        {
+            "vaults": {
+                "main": {
+                    "path": str(vault_path),
+                    "display_name": "vault",
+                    "role": "primary",
+                    "ai_access": "read",
+                },
+            }
+        }
+    )
+    monkeypatch.setattr(config, "VAULT_REGISTRY", registry)
+    monkeypatch.setattr(config, "PRIMARY_VAULT", registry.get_primary())
+    monkeypatch.setattr(config, "PRIMARY_VAULT_PATH", vault_path)
     monkeypatch.setattr(config, "VAULT_PATH", vault_path)
     app = create_app(host="127.0.0.1", port=0, token=api_token)
     return TestClient(app, headers=api_auth_headers)
@@ -38,7 +53,7 @@ def test_vault_search_basic(loopback_client):
         }
     ]
     with patch(
-        "obsidian_ai_hub.handler.obsidian_vault_retriever.search_obsidian_vault.func",
+        "obsidian_ai_hub.handler.obsidian_vault_retriever.search_single_vault",
         return_value=_mock_search_results(mock_items),
     ):
         res = loopback_client.get(
@@ -57,7 +72,7 @@ def test_vault_search_basic(loopback_client):
 
 def test_vault_search_empty(loopback_client):
     with patch(
-        "obsidian_ai_hub.handler.obsidian_vault_retriever.search_obsidian_vault.func",
+        "obsidian_ai_hub.handler.obsidian_vault_retriever.search_single_vault",
         return_value=_mock_search_results([]),
     ):
         res = loopback_client.get("/api/v1/vault-search", params={"q": "no_match"})
@@ -69,7 +84,7 @@ def test_vault_search_empty(loopback_client):
 
 def test_vault_search_error(loopback_client):
     with patch(
-        "obsidian_ai_hub.handler.obsidian_vault_retriever.search_obsidian_vault.func",
+        "obsidian_ai_hub.handler.obsidian_vault_retriever.search_single_vault",
         return_value=json.dumps({"error": "index not found"}),
     ):
         res = loopback_client.get("/api/v1/vault-search", params={"q": "test"})
@@ -99,7 +114,7 @@ def test_vault_search_token_required():
     assert res.status_code == 401
 
     with patch(
-        "obsidian_ai_hub.handler.obsidian_vault_retriever.search_obsidian_vault.func",
+        "obsidian_ai_hub.handler.obsidian_vault_retriever.search_single_vault",
         return_value=_mock_search_results([]),
     ):
         res = client.get(

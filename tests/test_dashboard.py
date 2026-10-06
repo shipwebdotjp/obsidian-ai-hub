@@ -18,6 +18,7 @@ def dashboard_env(tmp_path):
 
     with (
         patch.object(dashboard.config, "VAULT_PATH", vault),
+        patch.object(dashboard.config, "PRIMARY_VAULT_PATH", vault),
         patch.object(dashboard.config, "ACTIVITY_PATH", activity),
         patch.object(dashboard.config, "DAILY_PATH", daily),
         patch.object(dashboard.config, "DASHBOARD_PATH", dashboard_dir),

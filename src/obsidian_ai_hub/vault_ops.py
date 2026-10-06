@@ -17,6 +17,7 @@ def main_vault_write(
     relative_path: str,
     content_file: str | None,
     overwrite: bool,
+    vault_id: str | None = None,
 ) -> int:
     """Write UTF-8 content from a file (or stdin with ``-``) to the Vault."""
     try:
@@ -28,7 +29,9 @@ def main_vault_write(
             content = sys.stdin.read()
         else:
             content = Path(content_file).read_text(encoding="utf-8")
-        result = write_vault_file(relative_path, content, overwrite=overwrite)
+        result = write_vault_file(
+            relative_path, content, overwrite=overwrite, vault_id=vault_id
+        )
     except (OSError, ValueError) as exc:
         print(
             json.dumps(

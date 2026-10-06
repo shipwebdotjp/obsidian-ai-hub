@@ -131,6 +131,7 @@ def test_utf8_content_roundtrip():
 
 
 def test_vault_not_configured(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(app_config, "VAULT_REGISTRY", None)
     monkeypatch.setattr(app_config, "VAULT_PATH", "")
     res = _invoke_tool({"relative_path": "notes/x.md", "content": "hi"})
     assert "error" in res

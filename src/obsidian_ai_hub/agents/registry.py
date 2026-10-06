@@ -942,10 +942,10 @@ def _resolve_person_vault_note(vault_id: str) -> Optional[Dict[str, Any]]:
         # Verify containment before reading to avoid disclosing arbitrary files via symlink.
         try:
             resolved = target_path.resolve()
-            vault_root = Path(app_config.VAULT_PATH).resolve()
+            vault_root = Path(app_config.PRIMARY_VAULT_PATH).resolve()
             rel = str(resolved.relative_to(vault_root))
         except ValueError:
-            logger.warning("people_get: vault note %s is outside VAULT_PATH; skipping", target_path)
+            logger.warning("people_get: vault note %s is outside PRIMARY_VAULT_PATH; skipping", target_path)
             return None
         try:
             content = resolved.read_text(encoding="utf-8")

@@ -27,7 +27,7 @@ from obsidian_ai_hub.tasks.capability_schemas import (
     ui_output_schema,
     ui_target_schema,
 )
-from obsidian_ai_hub.utils.config import VAULT_PATH
+from obsidian_ai_hub.utils.config import PRIMARY_VAULT_PATH
 from obsidian_ai_hub.workflow.capabilities import (
     WORKFLOW_ONLY_INPUT_SCHEMA,
     WORKFLOW_ONLY_KEYS,
@@ -171,7 +171,7 @@ def catalog_search(query: str = "", target: str = "capability") -> list[dict[str
             ]
 
     if target_clean == "vault":
-        vault_root = Path(VAULT_PATH)
+        vault_root = Path(PRIMARY_VAULT_PATH)
         matches: list[dict[str, Any]] = []
         if vault_root.exists():
             for root, dirs, files in os.walk(vault_root):
@@ -286,7 +286,7 @@ def catalog_get_details(target: str, item_id: str) -> dict[str, Any]:
             }
 
     if target_clean == "vault":
-        vault_root = Path(VAULT_PATH).resolve()
+        vault_root = Path(PRIMARY_VAULT_PATH).resolve()
         try:
             full_path = (vault_root / item_clean).resolve()
             rel_path = str(full_path.relative_to(vault_root))

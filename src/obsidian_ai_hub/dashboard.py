@@ -131,7 +131,7 @@ def _parse_month(value: str) -> date_cls | None:
 
 def _relative_to_vault(path: Path) -> str:
     try:
-        return path.relative_to(config.VAULT_PATH).as_posix()
+        return path.relative_to(config.PRIMARY_VAULT_PATH).as_posix()
     except ValueError:
         return path.as_posix()
 
@@ -139,7 +139,7 @@ def _relative_to_vault(path: Path) -> str:
 def _obsidian_uri(note_path: str | None) -> str | None:
     if not note_path:
         return None
-    vault_name = config.VAULT_PATH.name or "Vault"
+    vault_name = config.PRIMARY_VAULT_PATH.name or "Vault"
     return f"obsidian://open?vault={quote(vault_name)}&file={quote(note_path)}"
 
 
@@ -462,7 +462,7 @@ def _build_manifest(year_payloads: dict[int, dict]) -> dict:
     return {
         "schema_version": SCHEMA_VERSION,
         "generated_at": datetime.now().isoformat(),
-        "vault_name": config.VAULT_PATH.name or "Vault",
+        "vault_name": config.PRIMARY_VAULT_PATH.name or "Vault",
         "available_years": available_years,
         "count": len(available_years),
         "totals": totals,

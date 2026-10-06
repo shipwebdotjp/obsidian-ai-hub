@@ -70,11 +70,13 @@ class TestIsolation:
             "config.JOB_RUN_STATE_PATH, config.KNOWLEDGE_SYNC_STATE_PATH)",
             extra_env={"ENV": "test", "OAIHUB_SKIP_DOTENV": "1"},
         )
+        import os as _os
+
         parts = out.split()
         assert len(parts) == 9
-        ws = parts[0]
+        ws = _os.path.realpath(parts[0])
         for p in parts[1:]:
-            assert str(p).startswith(ws), f"{p} not under {ws}"
+            assert str(_os.path.realpath(p)).startswith(ws), f"{p} not under {ws}"
 
     def test_env_vars_deleted(self):
         """ENV=test → OPENAI_APIKEY, LINE_TOKEN, APPLE_CALENDAR_NAME are deleted"""

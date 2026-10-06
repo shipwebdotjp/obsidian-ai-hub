@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 def build_system_prompt() -> str | None:
     from pathlib import Path
 
-    copilot_dir = Path(config.VAULT_PATH) / "copilot"
+    copilot_dir = Path(config.PRIMARY_VAULT_PATH) / "copilot"
     files_to_check = [
         copilot_dir / "AI_README.md",
         copilot_dir / "core" / "values.md",

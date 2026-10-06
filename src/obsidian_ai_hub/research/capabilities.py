@@ -243,7 +243,7 @@ def get_research_context_snapshot() -> dict:
         if not excerpt:
             continue
         try:
-            rel_path = str(path.relative_to(config.VAULT_PATH))
+            rel_path = str(path.relative_to(config.PRIMARY_VAULT_PATH))
         except Exception:
             rel_path = str(path)
         daily_notes.append(
@@ -253,7 +253,7 @@ def get_research_context_snapshot() -> dict:
     # 5. Latest Weekly Note with a meaningful excerpt only
     weekly_path = reader.get_weekly_note_path(today)
     try:
-        rel_weekly = str(weekly_path.relative_to(config.VAULT_PATH))
+        rel_weekly = str(weekly_path.relative_to(config.PRIMARY_VAULT_PATH))
     except Exception:
         rel_weekly = str(weekly_path)
     weekly_excerpt = ""
@@ -389,7 +389,7 @@ def read_periodic_note(period_type: str, reference_date: str) -> dict:
         raise ValueError("period_type must be 'day' or 'week'")
 
     try:
-        rel_path = str(path.relative_to(config.VAULT_PATH))
+        rel_path = str(path.relative_to(config.PRIMARY_VAULT_PATH))
     except Exception:
         rel_path = str(path)
 
