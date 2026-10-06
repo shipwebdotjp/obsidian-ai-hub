@@ -463,6 +463,39 @@ def test_backup_failure_is_recorded_in_execution_log(monkeypatch, test_memory_db
     assert "Permission denied" in detail["exception_message"]
 
 
+def test_backup_keyboard_interrupt_is_recorded_as_failed(monkeypatch, test_memory_db_path):
+    monkeypatch.setattr(sys, "argv", ["prog", "--backup"])
+
+    from obsidian_ai_hub.utils import execution_logger
+
+    with patch.object(main_module.do_backup, "main", side_effect=KeyboardInterrupt()):
+        with pytest.raises(KeyboardInterrupt):
+            main_module.main()
+
+    items, _ = execution_logger.list_execution_logs(kind="command")
+    detail = execution_logger.get_command_run_detail(items[0]["id"])
+    assert detail is not None
+    assert detail["command"] == "backup"
+    assert detail["status"] == "failed"
+    assert detail["exception_type"] == "KeyboardInterrupt"
+
+
+def test_backup_clean_exit_is_recorded_as_succeeded(monkeypatch, test_memory_db_path):
+    monkeypatch.setattr(sys, "argv", ["prog", "--backup"])
+
+    from obsidian_ai_hub.utils import execution_logger
+
+    with patch.object(main_module.do_backup, "main", side_effect=SystemExit(0)):
+        with pytest.raises(SystemExit):
+            main_module.main()
+
+    items, _ = execution_logger.list_execution_logs(kind="command")
+    detail = execution_logger.get_command_run_detail(items[0]["id"])
+    assert detail is not None
+    assert detail["command"] == "backup"
+    assert detail["status"] == "succeeded"
+
+
 # --- Coding CLI tests ---
 
 def test_coding_new_session_delegates_to_cli_module(monkeypatch):

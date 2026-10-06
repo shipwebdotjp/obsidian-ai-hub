@@ -112,6 +112,22 @@ def _run_cycle_locked(now: datetime) -> dict:
     interrupted = one_shot.mark_interrupted_orphans()
     if interrupted:
         logger.info("Marked %d orphaned one-shot job(s) as interrupted", interrupted)
+    # Crash recovery for the execution log: rows left `running` by a killed
+    # process (e.g. a backup attempt terminated before finalizing) become
+    # `failed` with StaleRunning recorded, so they stop lingering as running.
+    try:
+        from obsidian_ai_hub.utils import execution_logger
+
+        recovered_runs = execution_logger.recover_stale_command_runs()
+        recovered_calls = execution_logger.recover_stale_llm_calls()
+        if recovered_runs or recovered_calls:
+            logger.info(
+                "Recovered %d stale command run(s) and %d stale LLM call(s) as failed",
+                recovered_runs,
+                recovered_calls,
+            )
+    except Exception:
+        logger.exception("Stale command-run recovery failed; continuing cycle")
     finished = one_shot.run_due_one_shot_jobs()
     try:
         pruned = one_shot.prune_expired_one_shot_jobs()

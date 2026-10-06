@@ -214,7 +214,13 @@ def start_command_run(run_id: str, command: str, args: Dict[str, Any]) -> None:
 
 
 def succeed_command_run(run_id: str, result: Any) -> None:
-    """Logs the success of a command run with a summary of the result."""
+    """Logs the success of a command run with a summary of the result.
+
+    Only transitions rows still in ``running``: a row already reclaimed as
+    failed (e.g. by stale recovery racing a long-lived process) is never
+    resurrected, so the audit trail and the collector's recovery-time
+    reporting stay intact.
+    """
     conn = get_db_connection()
     try:
         finished_at = datetime.now(timezone.utc).isoformat()
@@ -228,7 +234,7 @@ def succeed_command_run(run_id: str, result: Any) -> None:
             """
             UPDATE command_runs
             SET finished_at = ?, status = 'succeeded', summary = ?
-            WHERE run_id = ?
+            WHERE run_id = ? AND status = 'running'
             """,
             (finished_at, summary, run_id),
         )
@@ -239,8 +245,12 @@ def succeed_command_run(run_id: str, result: Any) -> None:
         conn.close()
 
 
-def fail_command_run(run_id: str, exc: Exception) -> None:
-    """Logs the failure of a command run with traceback."""
+def fail_command_run(run_id: str, exc: BaseException) -> None:
+    """Logs the failure of a command run with traceback.
+
+    Only transitions rows still in ``running``; never overwrites a terminal
+    status recorded earlier (see :func:`succeed_command_run`).
+    """
     conn = get_db_connection()
     try:
         finished_at = datetime.now(timezone.utc).isoformat()
@@ -252,7 +262,7 @@ def fail_command_run(run_id: str, exc: Exception) -> None:
             """
             UPDATE command_runs
             SET finished_at = ?, status = 'failed', exception_type = ?, exception_message = ?, traceback = ?
-            WHERE run_id = ?
+            WHERE run_id = ? AND status = 'running'
             """,
             (finished_at, exc_type, exc_msg, tb_str, run_id),
         )
@@ -261,6 +271,139 @@ def fail_command_run(run_id: str, exc: Exception) -> None:
         logger.error("Failed to fail command run: %s", e)
     finally:
         conn.close()
+
+
+# Rows are only ever transitioned to a terminal status, so a killed process
+# cannot be distinguished from a still-running one by status alone. The
+# recovery below marks such orphans as ``failed`` with the StaleRunning
+# pseudo exception type instead of introducing new statuses: the
+# command_runs/llm_call_logs CHECK constraints, the API literals and the
+# Web UI filters all keep their 3-value (running/succeeded/failed) contract.
+STALE_RUNNING_EXCEPTION_TYPE = "StaleRunning"
+STALE_RUNNING_MESSAGE = "No terminal status recorded"
+
+
+def _resolve_stale_hours(stale_hours: Optional[int]) -> int:
+    if stale_hours is not None:
+        return int(stale_hours)
+    from obsidian_ai_hub.utils import config
+
+    return int(config.SYSTEM_MAINTENANCE_STALE_RUNNING_HOURS)
+
+
+def _as_utc(now: Optional[datetime]) -> datetime:
+    ref = now or datetime.now(timezone.utc)
+    if ref.tzinfo is None:
+        ref = ref.replace(tzinfo=timezone.utc)
+    return ref.astimezone(timezone.utc)
+
+
+def finalize_command_run_unless_terminal(
+    run_id: str,
+    *,
+    exception_type: str = "Interrupted",
+    message: Optional[str] = None,
+    now_iso: Optional[str] = None,
+) -> bool:
+    """Best-effort backstop: mark a still-``running`` command run as ``failed``.
+
+    Used in CLI ``finally`` blocks so every in-process exit path leaves a
+    terminal status. The update is conditional on ``status='running'``, so it
+    is a no-op (returns False) when the run was already finalized — e.g. by
+    the normal succeed/fail path or by ``suppress_command_run``. Never raises.
+    """
+    conn = None
+    try:
+        conn = get_db_connection()
+        finished_at = now_iso or datetime.now(timezone.utc).isoformat()
+        cur = conn.execute(
+            """
+            UPDATE command_runs
+            SET finished_at = ?, status = 'failed', exception_type = ?, exception_message = ?
+            WHERE run_id = ? AND status = 'running'
+            """,
+            (finished_at, exception_type, message or STALE_RUNNING_MESSAGE, run_id),
+        )
+        conn.commit()
+        return bool(cur.rowcount)
+    except Exception as e:
+        logger.error("Failed to finalize command run: %s", e)
+        return False
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def recover_stale_command_runs(
+    stale_hours: Optional[int] = None,
+    *,
+    now: Optional[datetime] = None,
+) -> int:
+    """Transition orphaned ``running`` command runs to ``failed``.
+
+    Targets rows older than ``stale_hours`` (default
+    ``SYSTEM_MAINTENANCE_STALE_RUNNING_HOURS``) — i.e. runs whose process was
+    killed before it could record a terminal status. Records the recovery
+    time as ``finished_at`` so the row is reported exactly once by the
+    failure collector. Only ever touches rows still in ``running``, so
+    repeated calls never double-update or double-notify. Raises on DB errors
+    so the scheduler can log them loudly.
+    """
+    ref = _as_utc(now)
+    finished_at = ref.isoformat()
+    cutoff = (ref - timedelta(hours=_resolve_stale_hours(stale_hours))).isoformat()
+    message = f"{STALE_RUNNING_MESSAGE} (recovered at {finished_at})"
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.execute(
+            """
+            UPDATE command_runs
+            SET finished_at = ?, status = 'failed',
+                exception_type = ?, exception_message = ?
+            WHERE status = 'running' AND started_at < ?
+            """,
+            (finished_at, STALE_RUNNING_EXCEPTION_TYPE, message, cutoff),
+        )
+        conn.commit()
+        return cur.rowcount or 0
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def recover_stale_llm_calls(
+    stale_hours: Optional[int] = None,
+    *,
+    now: Optional[datetime] = None,
+) -> int:
+    """Transition orphaned ``running`` LLM call logs to ``failed``.
+
+    Same contract as :func:`recover_stale_command_runs`: only rows older than
+    the cutoff that are still ``running`` are touched, the recovery time is
+    stored so the collector reports each row once, and DB errors propagate.
+    """
+    ref = _as_utc(now)
+    finished_at = ref.isoformat()
+    cutoff = (ref - timedelta(hours=_resolve_stale_hours(stale_hours))).isoformat()
+    message = f"{STALE_RUNNING_MESSAGE} (recovered at {finished_at})"
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.execute(
+            """
+            UPDATE llm_call_logs
+            SET finished_at = ?, status = 'failed',
+                exception_type = ?, exception_message = ?
+            WHERE status = 'running' AND started_at < ?
+            """,
+            (finished_at, STALE_RUNNING_EXCEPTION_TYPE, message, cutoff),
+        )
+        conn.commit()
+        return cur.rowcount or 0
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 MAX_TOOL_CALL_RESULT_LENGTH = 20000
@@ -409,7 +552,7 @@ def succeed_llm_call(
                 """
                 UPDATE llm_call_logs
                 SET response = ?, prompt_tokens = ?, completion_tokens = ?, total_tokens = ?, finish_reason = ?, finished_at = ?, status = 'succeeded', tool_calls_json = ?
-                WHERE call_id = ?
+                WHERE call_id = ? AND status = 'running'
                 """,
                 (response, prompt_tokens, completion_tokens, total_tokens, finish_reason, finished_at, tool_calls_json, call_id),
             )
@@ -418,7 +561,7 @@ def succeed_llm_call(
                 """
                 UPDATE llm_call_logs
                 SET response = ?, prompt_tokens = ?, completion_tokens = ?, total_tokens = ?, finish_reason = ?, finished_at = ?, status = 'succeeded'
-                WHERE call_id = ?
+                WHERE call_id = ? AND status = 'running'
                 """,
                 (response, prompt_tokens, completion_tokens, total_tokens, finish_reason, finished_at, call_id),
             )
@@ -431,7 +574,7 @@ def succeed_llm_call(
 
 def fail_llm_call(
     call_id: str,
-    exc: Exception,
+    exc: BaseException,
     tool_calls: Optional[List[Dict[str, Any]]] = None,
     diagnostics: Optional[Dict[str, Any]] = None,
 ) -> None:
@@ -460,7 +603,7 @@ def fail_llm_call(
                 """
                 UPDATE llm_call_logs
                 SET finished_at = ?, status = 'failed', exception_type = ?, exception_message = ?, traceback = ?, tool_calls_json = ?
-                WHERE call_id = ?
+                WHERE call_id = ? AND status = 'running'
                 """,
                 (finished_at, exc_type, exc_msg, tb_str, tool_calls_json, call_id),
             )
@@ -469,7 +612,7 @@ def fail_llm_call(
                 """
                 UPDATE llm_call_logs
                 SET finished_at = ?, status = 'failed', exception_type = ?, exception_message = ?, traceback = ?
-                WHERE call_id = ?
+                WHERE call_id = ? AND status = 'running'
                 """,
                 (finished_at, exc_type, exc_msg, tb_str, call_id),
             )

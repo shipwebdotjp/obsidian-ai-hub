@@ -157,6 +157,32 @@ permission request により turn が failed したことを受けて修正し�
 
 `SystemExit` は通常の `Exception` 捕捉を通らないため、CLI ラッパーの `finally` による `[END]` 出力だけが残り、`command_runs` が `running` のままになる。rsync の標準エラーも破棄されていたため、Web UI の実行ログだけでは失敗理由を確認できなかった。失敗した同期をすべて実行後に詳細を集約した例外として送出し、既存の例外ログ記録経路で保存する。
 
+## 強制終了で残った実行ログの回収
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-10-06 |
+| カテゴリ | バックアップ・実行ログ |
+| 決定内容 | 終了状態なく `running` のまま残った `command_runs` / `llm_call_logs` は、新ステータスを設けず `failed` + 例外種別 `StaleRunning` へ回収する。回収は job_runner 起動時に `stale_running_hours` 超過分へ実行し、診断は回収時刻基準で 1 回だけ報告する |
+
+### 結論に至った経緯
+
+定時 backup の初回試行が終了前に kill され、`running` 行が残る事象があった（リトライは成功）。`SystemExit(0)` や `KeyboardInterrupt` も同様に `running` を残す。SIGKILL では `try/finally` が走らないため、終了処理の強化だけでは防げず、one_shot の `mark_interrupted_orphans` と同型の回収が必要になった。
+
+新ステータス（`cancelled` / `timeout` / `stale` 等）は `command_runs` の CHECK 制約変更（テーブル再作成）、API の型、Web UI のフィルタに波及するため見送り、既存 3 値のまま例外種別で表現する。診断の fingerprint は `StaleRunning` / `No terminal status recorded` を維持し、回収後の行は `finished_at`（回収時刻）基準で拾うことで、開始時刻が古い行でも 1 回だけ提案に乗り、重複通知しない。
+
+### 構造と運用
+
+- `execution_logger.recover_stale_command_runs()` / `recover_stale_llm_calls()` が `status='running'` 限定の単一 UPDATE で回収し、件数を返す。冪等。
+- succeed/fail 系の終端遷移も `status='running'` 限定とし、回収済み行を生き残りプロセスの後続終了が上書きしない（先勝ちで監査証跡を保持）。
+- `job_runner.run_cycle` が `mark_interrupted_orphans` と並べて毎サイクル実行する（短命プロセスのため起動時回収と定期回収を兼ねる）。
+- CLI の `finally` には `finalize_command_run_unless_terminal()` の backstop を置き、`SystemExit(0)` は succeeded、`KeyboardInterrupt` 等は failed として記録する。
+
+### トレードオフ
+
+- kill された実行は `failed` として表示される。純粋な失敗と区別するには例外種別 `StaleRunning` を見る必要がある。
+- 6 時間を超える正当な長時間実行は回収対象になる。現状そのようなコマンドはなく、猶予は設定で変更できる。
+
 ## 共有SQLiteの所有者はdatabase.py、長期記憶はmemoryパッケージ
 
 | 項目 | 内容 |

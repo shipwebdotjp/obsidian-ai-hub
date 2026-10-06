@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from obsidian_ai_hub.database import get_db_connection
 from obsidian_ai_hub.utils import config
+from obsidian_ai_hub.utils.execution_logger import STALE_RUNNING_EXCEPTION_TYPE
 
 _MAX_QUERY_ROWS = 500
 _MAX_EXCEPTION_MESSAGES = 5
@@ -76,6 +77,19 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _dedupe_rows(rows: List[Any], key: str) -> List[Any]:
+    """Drop duplicate rows by key, keeping the first (newest) occurrence."""
+    seen = set()
+    unique = []
+    for row in rows:
+        value = row[key]
+        if value in seen:
+            continue
+        seen.add(value)
+        unique.append(row)
+    return unique
+
+
 def _fetch_command_rows(conn, cutoff: str, stale_cutoff: str) -> List[Any]:
     failed = conn.execute(
         """
@@ -99,7 +113,21 @@ def _fetch_command_rows(conn, cutoff: str, stale_cutoff: str) -> List[Any]:
         """,
         (stale_cutoff, _MAX_QUERY_ROWS),
     ).fetchall()
-    return failed + stale
+    # Rows already reclaimed by the stale recovery are `failed`, but their
+    # `started_at` may predate the window. Key them on the recovery time
+    # (`finished_at`) so each reclaimed run is reported once.
+    recovered = conn.execute(
+        """
+        SELECT run_id, command, exception_type, exception_message, traceback,
+               started_at, finished_at, status
+        FROM command_runs
+        WHERE status = 'failed' AND exception_type = ? AND finished_at >= ?
+        ORDER BY finished_at DESC
+        LIMIT ?;
+        """,
+        (STALE_RUNNING_EXCEPTION_TYPE, cutoff, _MAX_QUERY_ROWS),
+    ).fetchall()
+    return _dedupe_rows(failed + stale + recovered, "run_id")
 
 
 def _fetch_llm_rows(conn, cutoff: str, stale_cutoff: str) -> List[Any]:
@@ -125,7 +153,18 @@ def _fetch_llm_rows(conn, cutoff: str, stale_cutoff: str) -> List[Any]:
         """,
         (stale_cutoff, _MAX_QUERY_ROWS),
     ).fetchall()
-    return failed + stale
+    recovered = conn.execute(
+        """
+        SELECT call_id, run_id, provider, model, exception_type, exception_message,
+               traceback, started_at, finished_at, status
+        FROM llm_call_logs
+        WHERE status = 'failed' AND exception_type = ? AND finished_at >= ?
+        ORDER BY finished_at DESC
+        LIMIT ?;
+        """,
+        (STALE_RUNNING_EXCEPTION_TYPE, cutoff, _MAX_QUERY_ROWS),
+    ).fetchall()
+    return _dedupe_rows(failed + stale + recovered, "call_id")
 
 
 def _command_record(row: Any) -> Dict[str, Any]:

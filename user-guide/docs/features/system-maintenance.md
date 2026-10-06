@@ -31,6 +31,11 @@ uv run -m obsidian_ai_hub --system-maintenance
 診断そのものは読み取りのみで、リポジトリを変更しません。変更は承認後の
 コーディングタスクだけです。
 
+なお、プロセス強制終了などで終了状態が記録されなかった実行は、スケジューラ
+起動時に `failed`（例外種別 `StaleRunning`、メッセージ `No terminal status
+recorded`）へ回収されます（猶予は `stale_running_hours`）。回収時刻を基準に
+1 回だけ診断対象になるため、同じ実行が繰り返し提案されることはありません。
+
 ## 設定
 
 `config/config.yml`:

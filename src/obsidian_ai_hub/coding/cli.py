@@ -487,4 +487,8 @@ def main_coding(
                 execution_logger.fail_command_run(cli_run_id, RuntimeError(msg))
                 sys.exit(1)
     finally:
+        # Backstop: every known exit path above already finalized the run, but
+        # an unexpected BaseException (e.g. KeyboardInterrupt) would otherwise
+        # leak a `running` row. Only touches still-`running` rows.
+        execution_logger.finalize_command_run_unless_terminal(cli_run_id)
         execution_logger.current_run_id.reset(token)

@@ -539,6 +539,12 @@ def main():
                 execution_logger.fail_command_run(run_id, e)
                 if job_id is not None:
                     execution_logger.upsert_job_state(job_id, error=e)
+            else:
+                # A clean self-exit (code 0/None) used to leave the run
+                # `running` forever; record it as succeeded instead.
+                execution_logger.succeed_command_run(
+                    run_id, f"Exited with code {e.code} (no result recorded)"
+                )
             raise
         except Exception as e:
             print(f"[ERROR] {name}: {type(e).__name__}")
@@ -546,8 +552,17 @@ def main():
             if job_id is not None:
                 execution_logger.upsert_job_state(job_id, error=e)
             raise
+        except BaseException as e:
+            # KeyboardInterrupt and friends bypass `except Exception`; record
+            # them as failed with the real traceback instead of leaking a
+            # `running` row.
+            print(f"[ERROR] {name}: {type(e).__name__}")
+            execution_logger.fail_command_run(run_id, e)
+            raise
         finally:
             print(f"[END] {name} at {datetime.now().isoformat()}")
+            # Backstop for any path that skipped finalization above.
+            execution_logger.finalize_command_run_unless_terminal(run_id)
             execution_logger.current_run_id.reset(token)
 
     if getattr(args, "gmail_authorize", False):

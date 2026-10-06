@@ -37,8 +37,10 @@ def _insert_command_run(
     exception_message: str = "boom 123",
     status: str = "failed",
     started_at: str | None = None,
+    finished_at: str | None = None,
 ) -> None:
     started = started_at or _now_iso()
+    finished = finished_at if finished_at is not None else started
     conn.execute(
         """
         INSERT INTO command_runs (
@@ -51,7 +53,7 @@ def _insert_command_run(
             command,
             "{}",
             started,
-            started,
+            finished,
             status,
             None,
             exception_type if status != "running" else None,
@@ -71,8 +73,10 @@ def _insert_llm_call(
     exception_message: str = "timed out 42",
     status: str = "failed",
     started_at: str | None = None,
+    finished_at: str | None = None,
 ) -> None:
     started = started_at or _now_iso()
+    finished = finished_at if finished_at is not None else started
     conn.execute(
         """
         INSERT INTO llm_call_logs (
@@ -91,7 +95,7 @@ def _insert_llm_call(
             "prompt body should never reach the diagnosis prompt",
             None,
             started,
-            started,
+            finished,
             status,
             exception_type if status != "running" else None,
             exception_message if status != "running" else None,
@@ -162,6 +166,72 @@ def test_collect_bundles_llm_failures_into_command_finding():
     assert by_kind["command"]["related_llm_failures"][0]["call_id"] == "call_related"
     assert by_kind["llm"]["call_ids"] == ["call_standalone"]
     assert "prompt body" not in json.dumps(by_kind, ensure_ascii=False)
+
+
+def test_collect_detects_recovered_stale_run_by_recovery_time():
+    # A reclaimed StaleRunning row may have started before the window; it is
+    # keyed on the recovery time (finished_at) so it is reported once.
+    conn = get_db_connection()
+    _insert_command_run(
+        conn,
+        "run_recovered",
+        command="backup",
+        exception_type="StaleRunning",
+        exception_message="No terminal status recorded (recovered at ...)",
+        status="failed",
+        started_at=_now_iso(-48),
+        finished_at=_now_iso(),
+    )
+    conn.commit()
+    conn.close()
+
+    findings = collector.collect_failure_findings(window_hours=24, stale_running_hours=6)
+    assert len(findings) == 1
+    assert findings[0]["exception_type"] == "StaleRunning"
+    assert findings[0]["run_ids"] == ["run_recovered"]
+
+
+def test_collect_dedupes_recovered_stale_row_matched_by_both_queries():
+    # A recently reclaimed row matches both the failed-window query and the
+    # recovery-time query; it must still appear exactly once.
+    conn = get_db_connection()
+    _insert_command_run(
+        conn,
+        "run_recovered_recent",
+        command="backup",
+        exception_type="StaleRunning",
+        exception_message="No terminal status recorded (recovered at ...)",
+        status="failed",
+        started_at=_now_iso(-1),
+        finished_at=_now_iso(),
+    )
+    conn.commit()
+    conn.close()
+
+    findings = collector.collect_failure_findings(window_hours=24, stale_running_hours=6)
+    assert len(findings) == 1
+    assert findings[0]["run_ids"] == ["run_recovered_recent"]
+
+
+def test_collect_detects_recovered_stale_llm_call_by_recovery_time():
+    conn = get_db_connection()
+    _insert_llm_call(
+        conn,
+        "call_recovered",
+        run_id=None,
+        exception_type="StaleRunning",
+        exception_message="No terminal status recorded (recovered at ...)",
+        status="failed",
+        started_at=_now_iso(-48),
+        finished_at=_now_iso(),
+    )
+    conn.commit()
+    conn.close()
+
+    findings = collector.collect_failure_findings(window_hours=24, stale_running_hours=6)
+    assert len(findings) == 1
+    assert findings[0]["kind"] == "llm"
+    assert findings[0]["call_ids"] == ["call_recovered"]
 
 
 def test_sync_findings_resolves_and_reopens():
