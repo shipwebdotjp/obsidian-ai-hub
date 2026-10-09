@@ -73,6 +73,7 @@ _APP_ENV_VARS = [
     "CODING_OPENCODE_CLI_PATH",
     "CODING_OPENCODE_MODEL",
     "CODING_OPENCODE_MODELS",
+    "CODING_ACP_TURN_TIMEOUT_SECONDS",
     "IMAGE_GENERATION_OUTPUT_DIR",
     "IMAGE_GENERATION_INPUT_DIR",
     "IMAGE_GENERATION_MODEL",
@@ -1036,6 +1037,32 @@ CODING_OPENCODE_MODEL = str(
         default="opencode-go/muse-spark-1.3-contributor",
     )
 )
+
+
+def _load_coding_acp_turn_timeout() -> float:
+    raw = _env_or_config(
+        "CODING_ACP_TURN_TIMEOUT_SECONDS",
+        "coding",
+        "acp",
+        "turn_timeout_seconds",
+        default=7200.0,
+    )
+    try:
+        val = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(
+            f"Invalid configuration for CODING_ACP_TURN_TIMEOUT_SECONDS / "
+            f"coding.acp.turn_timeout_seconds: expected positive number, got {raw!r}"
+        ) from exc
+    if val <= 0:
+        raise RuntimeError(
+            f"Invalid configuration for CODING_ACP_TURN_TIMEOUT_SECONDS / "
+            f"coding.acp.turn_timeout_seconds: must be greater than 0, got {val}"
+        )
+    return val
+
+
+CODING_ACP_TURN_TIMEOUT_SECONDS = _load_coding_acp_turn_timeout()
 
 
 def _parse_coding_model_list(raw: object) -> list[str]:

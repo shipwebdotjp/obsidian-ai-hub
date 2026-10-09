@@ -1803,6 +1803,55 @@ describe("CodingPage", () => {
     });
   });
 
+  it("handles timed_out event, stops streaming, and displays timed_out badge", async () => {
+    mockStartSubscribeSuccess([
+      { eventId: 1, data: { event: "orchestrator_start", phase: "initial" } },
+      { eventId: 2, data: { event: "timed_out", message: "時間上限に到達しました" } },
+    ]);
+
+    vi.mocked(codingApi.getCodingSessionDetail).mockResolvedValue({
+      session: mockSession,
+      effective_tool_ids: ["web_search"],
+      has_custom_tools: false,
+      available_tools: [],
+      messages: [],
+      active_run: null,
+      latest_run: {
+        run_id: "crun_to",
+        session_id: "cses_111",
+        user_message_id: "cmsg_1",
+        orchestrator_message_id: null,
+        hitl_run_id: null,
+        worker_message_id: null,
+        status: "timed_out",
+        dirty_tree_at_start: null,
+        error_message: "ACP execution timed out",
+        started_at: "2026-01-01T00:00:00Z",
+        finished_at: "2026-01-01T02:00:00Z",
+      },
+      orchestrator_tool_calls: [],
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Test App")).toBeInTheDocument();
+    });
+
+    const textarea = screen.getByPlaceholderText(
+      "指示・質問を入力…（Enterで送信 / Shift+Enterで改行）",
+    );
+    fireEvent.change(textarea, { target: { value: "長時間タスク" } });
+
+    const sendBtn = screen.getByRole("button", { name: "送信" });
+    fireEvent.click(sendBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText("時間上限に到達しました")).toBeInTheDocument();
+      expect(screen.getByText("ステータス: 制限時間到達 (ACP execution timed out)")).toBeInTheDocument();
+    });
+  });
+
   it("renders live ACP worker text, thought, and tool calls, then clears on worker_done", async () => {
     vi.mocked(codingApi.startCodingRun).mockResolvedValue({
       run: mockCodingRun({ run_id: "crun_acp_live", session_id: "cses_111" }),

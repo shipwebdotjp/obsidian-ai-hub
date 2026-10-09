@@ -55,6 +55,7 @@ coding:
   cli:
     opencode_path: /path/to/your/opencode   # 既定: PATH 上の opencode
   acp:
+    turn_timeout_seconds: 7200 # 既定: 7200秒（2時間）
     opencode_model: opencode-go/muse-spark-1.3-contributor
     opencode_models:
       - opencode-go/muse-spark-1.3-contributor
@@ -65,9 +66,12 @@ coding:
 | `coding.orchestrator.provider` | `CODING_ORCHESTRATOR_PROVIDER` | `openai` |
 | `coding.orchestrator.model` | `CODING_ORCHESTRATOR_MODEL` | `gpt-5.6-terra` |
 | `coding.cli.opencode_path` | `CODING_OPENCODE_CLI_PATH` | `opencode` |
+| `coding.acp.turn_timeout_seconds` | `CODING_ACP_TURN_TIMEOUT_SECONDS` | `7200`（2時間） |
 | `coding.acp.opencode_model` | `CODING_OPENCODE_MODEL` | `opencode-go/muse-spark-1.3-contributor` |
 | `coding.acp.opencode_models` | `CODING_OPENCODE_MODELS` | 上記 1 件 |
 
+- `turn_timeout_seconds` は各 ACP `session/prompt` ターン単位の実行制限時間（正の秒数、既定: 7200秒＝2時間）を設定します。タイマーはターンごとにリセットされ、HITL待機や Coordinator による次ターンは別枠です。不正な値や 0 以下の値は起動時にエラーとなります。変更の反映には Web サービスの再起動が必要です。
+- 時間上限に到達した場合は ACP に `session/cancel` を一度だけ送信し、run 状態は独立した終端状態 `timed_out`（画面表示: 制限時間到達）に遷移して failure カテゴリの通知を配信します。明示的なキャンセル（`cancelled`）とは区別されます。
 - 使用モデルは毎ターンの prompt 前に ACP の `session/set_config_option`（`configId: "model"`）で固定されます。拒否された場合はそのターンが失敗します。
 - 選択したモデルが reasoning effort（カテゴリ `thought_level`）を広告する場合、`max → xhigh → high → medium → low` の優先順で最初に利用できる値を同じ `session/set_config_option` で設定します。広告がない、または優先順の値がない場合は OpenCode の既定値で実行し、実行診断に広告値と未対応理由を記録します。設定が拒否された場合はそのターンを失敗させ、既定値へはフォールバックしません。
 - 選択できるモデルは `opencode_models` の許可リストに限られます。

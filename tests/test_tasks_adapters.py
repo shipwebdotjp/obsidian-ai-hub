@@ -564,6 +564,24 @@ def test_coding_adapter_failed_child(monkeypatch):
         CodingAdapter().execute_step(task, plan, 0, plan["plan"]["steps"][0])
 
 
+def test_coding_adapter_timed_out_child(monkeypatch):
+    _mock_coding_success(monkeypatch)
+    monkeypatch.setattr(
+        coding_store,
+        "get_run",
+        lambda run_id: {
+            "run_id": run_id,
+            "status": "timed_out",
+            "error_message": "ACP execution timed out",
+        },
+    )
+    task, plan = _task_with_plan("coding_cli", {"project_id": 7})
+    with pytest.raises(ValueError) as exc_info:
+        CodingAdapter().execute_step(task, plan, 0, plan["plan"]["steps"][0])
+    assert "timed_out" in str(exc_info.value)
+    assert not issubclass(exc_info.type, execution.TaskCancelled)
+
+
 def test_composite_executor_dispatch_and_rejection(monkeypatch):
     from obsidian_ai_hub.handler.web_search import WebSearchInput
 

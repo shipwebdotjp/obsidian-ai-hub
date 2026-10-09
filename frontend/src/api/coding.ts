@@ -169,7 +169,8 @@ export type CodingRunStatus =
   | "completed"
   | "failed"
   | "cancelled"
-  | "interrupted";
+  | "interrupted"
+  | "timed_out";
 
 export interface SlashInvocation {
   kind: "skill";
@@ -317,6 +318,7 @@ export type CodingSseEvent =
   | { event: "done"; run_id: string; status: string; git_status?: GitStatus; session_title?: string }
   | { event: "user_question"; hitl_run_id: string; question_set_id: string; questions: QuestionItem[] }
   | { event: "cancelled"; message: string }
+  | { event: "timed_out"; message: string }
   | { event: "error"; message: string };
 
 export function getGitStatus(repoPath: string): Promise<GitStatus> {
@@ -478,7 +480,7 @@ export async function subscribeCodingRunEvents(
     // from the existing event cursor after the answer to replay in order.
     isTerminal: (envelope) => {
       const type = String(envelope.data["event"] ?? envelope.data["type"] ?? "");
-      return type === "done" || type === "error" || type === "cancelled";
+      return type === "done" || type === "error" || type === "cancelled" || type === "timed_out";
     },
   });
 }

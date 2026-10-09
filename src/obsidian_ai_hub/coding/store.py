@@ -37,6 +37,9 @@ def _notify_coding_status_change(run: dict[str, Any]) -> None:
     elif status == "interrupted":
         category = "failure"
         title = "【中断】コーディング処理が中断されました"
+    elif status == "timed_out":
+        category = "failure"
+        title = "【時間上限到達】コーディング処理が制限時間を超えました"
     else:
         return
 
@@ -73,7 +76,7 @@ CODING_NON_TERMINAL_STATUSES = frozenset(
     {"queued", "running", "cancelling", "waiting_user"}
 )
 CODING_TERMINAL_STATUSES = frozenset(
-    {"completed", "failed", "cancelled", "interrupted"}
+    {"completed", "failed", "cancelled", "interrupted", "timed_out"}
 )
 CODING_ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
     "queued": frozenset({"running", "cancelling", "interrupted", "failed"}),
@@ -85,9 +88,10 @@ CODING_ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
             "cancelling",
             "waiting_user",
             "interrupted",
+            "timed_out",
         }
     ),
-    "cancelling": frozenset({"cancelled", "failed", "interrupted", "completed"}),
+    "cancelling": frozenset({"cancelled", "failed", "interrupted", "completed", "timed_out"}),
     "waiting_user": frozenset(
         {
             "running",
@@ -97,6 +101,7 @@ CODING_ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
             "interrupted",
             "cancelling",
             "queued",
+            "timed_out",
         }
     ),
 }
@@ -121,6 +126,7 @@ CODING_EVENT_TYPES = frozenset(
         "done",
         "error",
         "cancelled",
+        "timed_out",
     }
 )
 
