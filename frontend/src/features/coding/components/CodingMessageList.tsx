@@ -817,10 +817,12 @@ export function CodingMessageList({
                 ? "bg-red-100 text-red-800"
                 : currentRun.status === "cancelled"
                 ? "bg-slate-200 text-slate-700"
+                : currentRun.status === "timed_out"
+                ? "bg-rose-100 text-rose-800"
                 : "bg-amber-100 text-amber-800"
             }`}
           >
-            ステータス: {currentRun.status}
+            ステータス: {currentRun.status === "timed_out" ? "制限時間到達" : currentRun.status}
             {currentRun.error_message && ` (${currentRun.error_message})`}
           </span>
         </div>

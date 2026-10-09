@@ -344,6 +344,19 @@ export function useCodingRunStream({
         abortControllerRef.current = null;
         activeRunIdRef.current = null;
         return;
+      } else if (type === "timed_out") {
+        queueBlockedRef.current = false;
+        clearQueueRetry();
+        ctx.restoreSendText();
+        if (!isCurrentSession) return;
+        onError(String(data.message ?? "時間上限に到達しました"));
+        setIsStreaming(false);
+        setActivePhaseText(null);
+        setWorkerState({ status: "idle" });
+        clearAcpLiveDisplay();
+        abortControllerRef.current = null;
+        activeRunIdRef.current = null;
+        return;
       } else if (type === "error") {
         queueBlockedRef.current = false;
         clearQueueRetry();
@@ -386,6 +399,9 @@ export function useCodingRunStream({
         clearAcpLiveDisplay();
         abortControllerRef.current = null;
         activeRunIdRef.current = null;
+        if (data.status === "timed_out") {
+          onError("時間上限に到達しました");
+        }
         if (data.git_status && typeof data.git_status === "object") {
           setGitStatus(data.git_status as GitStatus);
         }

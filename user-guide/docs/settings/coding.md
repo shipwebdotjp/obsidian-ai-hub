@@ -16,6 +16,7 @@ coding:
   cli:
     opencode_path: /path/to/your/opencode
   acp:
+    turn_timeout_seconds: 7200
     opencode_model: opencode-go/muse-spark-1.3-contributor
     opencode_models:
       - opencode-go/muse-spark-1.3-contributor
@@ -26,8 +27,18 @@ coding:
 | `coding.orchestrator.provider` | `CODING_ORCHESTRATOR_PROVIDER` | `openai` |
 | `coding.orchestrator.model` | `CODING_ORCHESTRATOR_MODEL` | `gpt-5.6-terra` |
 | `coding.cli.opencode_path` | `CODING_OPENCODE_CLI_PATH` | `opencode`（PATH 上） |
+| `coding.acp.turn_timeout_seconds` | `CODING_ACP_TURN_TIMEOUT_SECONDS` | `7200`（2時間） |
 | `coding.acp.opencode_model` | `CODING_OPENCODE_MODEL` | `opencode-go/muse-spark-1.3-contributor` |
 | `coding.acp.opencode_models` | `CODING_OPENCODE_MODELS`（カンマ区切り） | `opencode_model` の 1 件 |
+
+## ターン制限時間とタイムアウト（`timed_out`）
+
+- `coding.acp.turn_timeout_seconds`（`CODING_ACP_TURN_TIMEOUT_SECONDS`）で ACP `session/prompt` の 1 ターンあたりの上限時間を秒数で設定します（既定: 7200秒＝2時間）。
+- 制限時間は1回の ACP ターン単位に適用され、HITL ユーザー確認待機や Coordinator による次ターンでは別枠でタイマーが再開されます。
+- 正の数（> 0）のみ受け付け、0以下や非数値は起動時／設定読み込み時に明示的にエラーとなります。変更の反映には Web サービスの再起動が必要です。
+- ユーザーによる明示的な取り消しは `cancelling` → `cancelled` となり、時間上限到達時は `session/cancel` を1回送信して独立した終端状態 `timed_out` に移行します。
+- `timed_out` 発生時は実行中ツール呼び出しを `interrupted`（理由: 時間上限到達）に更新し、failure カテゴリの通知（「時間上限到達」）を配信します。
+- Task Agent の `coding_cli` 子 run が `timed_out` となった場合、ユーザー取消ではなく実行失敗として上位 Task に伝播します。
 
 ## Coordinator の役割
 

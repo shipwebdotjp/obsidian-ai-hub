@@ -658,6 +658,26 @@ async def execute_coding_run(run_id: str) -> None:
                         pass
                     return None, act_acp_id
 
+                if acp_res.timed_out:
+                    try:
+                        store.mark_running_tool_calls_interrupted_for_run(
+                            run_id, error="ACP execution timed out (reached limit)"
+                        )
+                    except Exception:
+                        pass
+                    try:
+                        store.transition_run_status(
+                            run_id, "timed_out",
+                            error_message="ACP execution timed out", finished=True,
+                        )
+                    except ValueError:
+                        pass
+                    try:
+                        store.append_run_event(run_id, "timed_out", {"message": "ACP実行が制限時間に到達しました"})
+                    except Exception:
+                        pass
+                    return None, act_acp_id
+
                 return acp_res, act_acp_id
 
             try:

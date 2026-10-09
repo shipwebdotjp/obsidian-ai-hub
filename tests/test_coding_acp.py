@@ -9,6 +9,28 @@ from obsidian_ai_hub.coding import acp, service, store
 from obsidian_ai_hub.database import get_db_connection
 
 
+def test_coding_acp_turn_timeout_config():
+    from obsidian_ai_hub.utils.config import _load_coding_acp_turn_timeout
+
+    with patch("obsidian_ai_hub.utils.config._env_or_config", return_value="3600"):
+        assert _load_coding_acp_turn_timeout() == 3600.0
+
+    with patch("obsidian_ai_hub.utils.config._env_or_config", return_value=7200.0):
+        assert _load_coding_acp_turn_timeout() == 7200.0
+
+    with patch("obsidian_ai_hub.utils.config._env_or_config", return_value="0"):
+        with pytest.raises(RuntimeError, match="must be greater than 0"):
+            _load_coding_acp_turn_timeout()
+
+    with patch("obsidian_ai_hub.utils.config._env_or_config", return_value="-10"):
+        with pytest.raises(RuntimeError, match="must be greater than 0"):
+            _load_coding_acp_turn_timeout()
+
+    with patch("obsidian_ai_hub.utils.config._env_or_config", return_value="invalid_number"):
+        with pytest.raises(RuntimeError, match="expected positive number"):
+            _load_coding_acp_turn_timeout()
+
+
 def test_acp_launch_profile():
     p_opencode = acp.AcpLaunchProfile.get_profile("opencode")
     assert p_opencode.profile_id == "opencode_acp"
@@ -466,6 +488,73 @@ def test_acp_agent_version_mismatch_warns(caplog):
     assert "differs from pinned" in caplog.text
 
 
+def test_acp_turn_timeout_sends_cancel_once_and_sets_timed_out():
+    """When ACP turn exceeds timeout, session/cancel is sent once and timed_out is set."""
+    profile = acp.AcpLaunchProfile.get_profile("opencode")
+    client = acp.AcpClientBackend(profile)
+    notifications = []
+
+    with patch.object(acp.AcpConnection, "start"), \
+         patch.object(acp.AcpConnection, "is_alive", return_value=True), \
+         patch.object(acp.AcpConnection, "terminate", return_value=0), \
+         patch.object(acp.AcpClientBackend, "initialize", return_value={"protocol_version": 1, "capabilities": {}}):
+
+        def fake_notify(method, params):
+            notifications.append((method, params))
+
+        with patch.object(acp.AcpConnection, "request", return_value={"sessionId": "s_timeout"}), \
+             patch.object(acp.AcpConnection, "send_request_async", return_value=1), \
+             patch.object(acp.AcpConnection, "wait_for_response", return_value=None), \
+             patch.object(acp.AcpConnection, "notify", side_effect=fake_notify), \
+             patch.object(acp.AcpConnection, "pop_notifications", return_value=[]), \
+             patch.object(acp.AcpConnection, "pop_client_requests", return_value=[]):
+
+            res = client.execute_turn(repo_path="/tmp", prompt="hi", timeout=0.001)
+
+            assert res.timed_out is True
+            assert res.cancelled is False
+            assert res.end_reason == "timed_out"
+            assert res.error_message == "ACP execution timed out"
+            assert res.diagnostics["end_reason"] == "timed_out"
+            cancel_notifs = [n for n in notifications if n[0] == "session/cancel"]
+            assert len(cancel_notifs) == 1
+            assert cancel_notifs[0][1] == {"sessionId": "s_timeout"}
+
+
+def test_acp_turn_cancel_event_prefers_user_cancelled():
+    """Explicit cancel event sets cancelled=True and end_reason='user_cancelled'."""
+    profile = acp.AcpLaunchProfile.get_profile("opencode")
+    client = acp.AcpClientBackend(profile)
+    cancel_event = acp.threading.Event()
+    cancel_event.set()
+    notifications = []
+
+    with patch.object(acp.AcpConnection, "start"), \
+         patch.object(acp.AcpConnection, "is_alive", return_value=True), \
+         patch.object(acp.AcpConnection, "terminate", return_value=0), \
+         patch.object(acp.AcpClientBackend, "initialize", return_value={"protocol_version": 1, "capabilities": {}}):
+
+        def fake_notify(method, params):
+            notifications.append((method, params))
+
+        with patch.object(acp.AcpConnection, "request", return_value={"sessionId": "s_cancel"}), \
+             patch.object(acp.AcpConnection, "send_request_async", return_value=1), \
+             patch.object(acp.AcpConnection, "wait_for_response", return_value=None), \
+             patch.object(acp.AcpConnection, "notify", side_effect=fake_notify), \
+             patch.object(acp.AcpConnection, "pop_notifications", return_value=[]), \
+             patch.object(acp.AcpConnection, "pop_client_requests", return_value=[]):
+
+            res = client.execute_turn(
+                repo_path="/tmp", prompt="hi", cancel_event=cancel_event, timeout=0.001
+            )
+
+            assert res.cancelled is True
+            assert res.timed_out is False
+            assert res.end_reason == "user_cancelled"
+            assert res.error_message == "Cancelled by user"
+            assert res.diagnostics["end_reason"] == "user_cancelled"
+
+
 def test_acp_prompt_error_fails_loudly():
     """Agent-side prompt errors fail the turn instead of empty output."""
     profile = acp.AcpLaunchProfile.get_profile("opencode")
@@ -518,6 +607,70 @@ def test_acp_stdout_pollution_ignored():
     notifs = conn.pop_notifications()
     assert len(notifs) == 1
     assert notifs[0]["method"] == "session/update"
+
+
+def test_worker_acp_timeout_sets_timed_out_status_and_event(tmp_path):
+    """Worker handles timed_out ACP result by marking run as timed_out with timed_out event."""
+    import subprocess as _subprocess
+
+    from obsidian_ai_hub.coding.orchestrator import CodingOrchestrator
+    from obsidian_ai_hub.runs.coding_worker import execute_coding_run
+
+    repo = tmp_path / "acp_timeout_repo"
+    repo.mkdir()
+    _subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+
+    conn = get_db_connection()
+    now = "2026-09-15T00:00:00+09:00"
+    cur = conn.execute(
+        "INSERT INTO projects (normalized_name, display_name, domain, status, created_at, updated_at, project_path) "
+        "VALUES ('acp-timeout-proj', 'ACP Timeout Proj', 'personal', 'active', ?, ?, ?)",
+        (now, now, str(repo)),
+    )
+    project_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+
+    sess = store.create_session(
+        project_id=project_id,
+        backend="opencode",
+        repo_path=str(repo),
+        title="ACP Timeout Worker Session",
+        transport="acp",
+    )
+
+    _, run = store.start_queued_run(sess["session_id"], "do long work")
+
+    async def fake_events(*args, **kwargs):
+        yield {
+            "type": "text",
+            "content": "go\n<cli_request>\nrun long command\n</cli_request>",
+        }
+
+    fake_res = acp.AcpExecutionResult(
+        acp_session_id="acp_sess_timeout",
+        output="",
+        exit_code=-1,
+        stop_reason=None,
+        error_message="ACP execution timed out",
+        cancelled=False,
+        timed_out=True,
+        diagnostics={"end_reason": "timed_out"},
+    )
+
+    with (
+        patch.object(
+            CodingOrchestrator, "generate_response_events", side_effect=fake_events
+        ),
+        patch.object(acp.AcpClientBackend, "execute_turn", return_value=fake_res),
+    ):
+        asyncio.run(execute_coding_run(run["run_id"]))
+
+    got = store.get_run(run["run_id"])
+    assert got["status"] == "timed_out"
+    assert "ACP execution timed out" in got["error_message"]
+    events = store.list_run_events(run["run_id"], 0, 200)
+    assert any(e["event_type"] == "timed_out" for e in events)
 
 
 def test_worker_acp_transport_end_to_end(tmp_path):

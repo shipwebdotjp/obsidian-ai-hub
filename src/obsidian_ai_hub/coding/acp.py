@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 from obsidian_ai_hub.utils.config import (
+    CODING_ACP_TURN_TIMEOUT_SECONDS,
     CODING_OPENCODE_CLI_PATH,
     CODING_OPENCODE_MODEL,
 )
@@ -21,7 +22,7 @@ from obsidian_ai_hub.utils.config import (
 logger = logging.getLogger(__name__)
 
 SUPPORTED_PROTOCOL_VERSION = 1
-DEFAULT_ACP_TURN_TIMEOUT_S = 600.0
+DEFAULT_ACP_TURN_TIMEOUT_S = CODING_ACP_TURN_TIMEOUT_SECONDS
 
 # Single source of truth for the advertised elicitation capability (form only).
 ELICITATION_FORM_CAPABILITY: Dict[str, Any] = {"form": {}}
@@ -371,8 +372,17 @@ class AcpExecutionResult:
     stop_reason: Optional[str] = None
     error_message: Optional[str] = None
     cancelled: bool = False
+    timed_out: bool = False
     session_recreated: bool = False
     diagnostics: Optional[Dict[str, Any]] = None
+
+    @property
+    def end_reason(self) -> Optional[str]:
+        if self.cancelled:
+            return "user_cancelled"
+        if self.timed_out:
+            return "timed_out"
+        return None
 
 
 class AcpConnection:
@@ -972,6 +982,7 @@ class AcpClientBackend:
             connection_token = f"acpconn_{_uuid.uuid4().hex[:12]}"
             poll_interval = 0.1
             cancelled = False
+            timed_out = False
             prompt_response: Optional[Dict[str, Any]] = None
             elicitations: List[Dict[str, Any]] = []
             update_kinds: Dict[str, int] = {}
@@ -990,7 +1001,7 @@ class AcpClientBackend:
 
                 # Check timeout
                 if timeout is not None and (time.monotonic() - start_time) >= timeout:
-                    cancelled = True
+                    timed_out = True
                     try:
                         conn.notify("session/cancel", {"sessionId": curr_session_id})
                     except Exception:
@@ -1167,13 +1178,25 @@ class AcpClientBackend:
                 "usage": dict(usage_acc) or None,
             }
 
+            if cancelled:
+                diag["end_reason"] = "user_cancelled"
+                err_msg = "Cancelled by user"
+            elif timed_out:
+                diag["end_reason"] = "timed_out"
+                err_msg = "ACP execution timed out"
+            elif exit_code != 0 and stderr_str:
+                err_msg = stderr_str
+            else:
+                err_msg = None
+
             return AcpExecutionResult(
                 acp_session_id=curr_session_id,
                 output=final_output,
-                exit_code=exit_code if not cancelled else -1,
+                exit_code=exit_code if not (cancelled or timed_out) else -1,
                 stop_reason=stop_reason,
-                error_message="Cancelled by user or timed out" if cancelled else (stderr_str if exit_code != 0 and stderr_str else None),
+                error_message=err_msg,
                 cancelled=cancelled,
+                timed_out=timed_out,
                 session_recreated=session_recreated,
                 diagnostics=diag,
             )
