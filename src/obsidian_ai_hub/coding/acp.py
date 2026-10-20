@@ -6,6 +6,8 @@ import json
 import logging
 import os
 import queue
+import re
+import shutil
 import signal
 import subprocess
 import threading
@@ -23,6 +25,24 @@ logger = logging.getLogger(__name__)
 
 SUPPORTED_PROTOCOL_VERSION = 1
 DEFAULT_ACP_TURN_TIMEOUT_S = CODING_ACP_TURN_TIMEOUT_SECONDS
+
+# `opencode acp` serve flags required by the 1.x CLI (bare `opencode acp`
+# died with ServeError in 1.18.31) and rejected as unrecognized flags by 2.x
+# (see docs/acp/compatibility-matrix.md).
+OPENCODE_ACP_LEGACY_SERVE_ARGS: Tuple[str, ...] = (
+    "--hostname",
+    "127.0.0.1",
+    "--port",
+    "0",
+)
+# Version verified against the ACP flow; a different one only logs a warning.
+OPENCODE_EXPECTED_VERSION = "2.0.32"
+
+# OpenCode 2.x emits the final message/usage updates after the session/prompt
+# response. Drain until quiet, bounded to keep a chatty agent from stalling the
+# turn after its response has already arrived.
+RESPONSE_DRAIN_IDLE_S = 0.5
+RESPONSE_DRAIN_MAX_S = 5.0
 
 # Single source of truth for the advertised elicitation capability (form only).
 ELICITATION_FORM_CAPABILITY: Dict[str, Any] = {"form": {}}
@@ -334,6 +354,80 @@ def _permission_record(
     }
 
 
+_CLI_VERSION_RE = re.compile(r"(?<![\w.])v?(\d+)\.(\d+)\.(\d+)")
+
+
+def _cli_fingerprint(path: str) -> Optional[Tuple[int, int]]:
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None
+    return (stat.st_mtime_ns, stat.st_size)
+
+
+def _probe_opencode_cli_major_version(executable: str) -> Optional[int]:
+    """Probe the CLI major version, or None when it cannot be determined."""
+    try:
+        proc = subprocess.run(
+            [executable, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.debug("Could not probe OpenCode CLI version for '%s': %s", executable, exc)
+        return None
+    if proc.returncode != 0:
+        logger.debug(
+            "OpenCode CLI version probe for '%s' exited with %s",
+            executable,
+            proc.returncode,
+        )
+        return None
+    # Prefer the CLI's own stdout: stderr may carry unrelated runtime versions.
+    match = _CLI_VERSION_RE.search(proc.stdout or "")
+    if match is None:
+        match = _CLI_VERSION_RE.search(proc.stderr or "")
+    if match is None:
+        return None
+    return int(match.group(1))
+
+
+# Detected majors keyed by (resolved executable, mtime+size). Only successful
+# probes are cached so a transient failure (slow start, fork failure) does not
+# pin the process to the wrong CLI contract until restart.
+_CLI_MAJOR_CACHE: Dict[Tuple[str, Tuple[int, int]], int] = {}
+
+
+def _opencode_cli_major_version(executable: str) -> int:
+    """Return the OpenCode CLI major version, or a modern default when unknown.
+
+    The ACP launch arguments differ between the 1.x and 2.x CLIs, so the
+    installed version is probed with ``--version``. When probing fails (binary
+    missing, wrapper without ``--version``) the 2.x syntax is used: it is the
+    current CLI contract, and a wrong assumption surfaces as an explicit
+    startup error instead of the flags being silently ignored.
+
+    Results are cached per executable fingerprint (mtime + size) so a per-turn
+    profile build does not spawn the CLI repeatedly, while an in-place upgrade
+    still invalidates the cache.
+    """
+    path = shutil.which(executable) or executable
+    fingerprint = _cli_fingerprint(path)
+    if fingerprint is not None:
+        cached = _CLI_MAJOR_CACHE.get((path, fingerprint))
+        if cached is not None:
+            return cached
+    major = _probe_opencode_cli_major_version(path)
+    if major is None:
+        return 2
+    if fingerprint is not None:
+        if len(_CLI_MAJOR_CACHE) >= 8:
+            _CLI_MAJOR_CACHE.clear()
+        _CLI_MAJOR_CACHE[(path, fingerprint)] = major
+    return major
+
+
 @dataclass
 class AcpLaunchProfile:
     """Launch configuration profile for the OpenCode ACP Agent subprocess."""
@@ -345,6 +439,9 @@ class AcpLaunchProfile:
     env_overrides: Dict[str, str] = field(default_factory=dict)
     supports_resume: bool = True
     expected_version: Optional[str] = None
+    # Detected CLI major version; None when the profile was not built by
+    # get_profile (unknown is treated as a modern CLI).
+    cli_major_version: Optional[int] = None
 
     @classmethod
     def get_profile(cls, backend_name: str) -> AcpLaunchProfile:
@@ -352,15 +449,23 @@ class AcpLaunchProfile:
         if b != "opencode":
             raise ValueError(f"Unknown ACP backend: '{backend_name}' (expected 'opencode')")
         exe = CODING_OPENCODE_CLI_PATH or "opencode"
-        # --hostname/--port are mandatory: bare `opencode acp` dies with
-        # ServeError (1.18.31, see compatibility-matrix).
+        # 1.x needs --hostname/--port (bare `opencode acp` dies with ServeError,
+        # see compatibility-matrix); 2.x rejects those flags and runs `acp`
+        # over stdio as-is.
+        major = _opencode_cli_major_version(exe)
+        argv = [exe, "acp"]
+        if major < 2:
+            argv.extend(OPENCODE_ACP_LEGACY_SERVE_ARGS)
         return cls(
             profile_id="opencode_acp",
             backend_name="opencode",
             executable=exe,
-            argv=[exe, "acp", "--hostname", "127.0.0.1", "--port", "0"],
+            argv=argv,
             supports_resume=True,
-            expected_version="1.18.31",
+            expected_version=(
+                OPENCODE_EXPECTED_VERSION if major >= 2 else "1.18.31"
+            ),
+            cli_major_version=major,
         )
 
 
@@ -406,7 +511,12 @@ class AcpConnection:
         self._notifications: queue.Queue = queue.Queue()
         self._client_requests: queue.Queue = queue.Queue()
         self.stderr_chunks: List[str] = []
+        # Non-JSON stdout lines (warnings, CLI help on bad flags) kept only for
+        # failure diagnostics; they are never interpreted as protocol data.
+        self.stdout_noise: List[str] = []
         self._threads: List[threading.Thread] = []
+        self._stdout_thread: Optional[threading.Thread] = None
+        self._stderr_thread: Optional[threading.Thread] = None
         self._closed = False
 
     def start(self) -> None:
@@ -433,6 +543,8 @@ class AcpConnection:
         t_err = threading.Thread(target=self._read_stderr, daemon=True)
         t_out.start()
         t_err.start()
+        self._stdout_thread = t_out
+        self._stderr_thread = t_err
         self._threads = [t_out, t_err]
 
     def _read_stdout(self) -> None:
@@ -445,8 +557,10 @@ class AcpConnection:
                 try:
                     msg = json.loads(text)
                 except json.JSONDecodeError:
+                    self._record_stdout_noise(text)
                     continue
                 if not isinstance(msg, dict):
+                    self._record_stdout_noise(text)
                     continue
 
                 if "id" in msg and ("result" in msg or "error" in msg):
@@ -465,6 +579,11 @@ class AcpConnection:
                 self.proc.stdout.close()
             except Exception:
                 pass
+
+    def _record_stdout_noise(self, text: str) -> None:
+        self.stdout_noise.append(text[:500])
+        if len(self.stdout_noise) > 20:
+            del self.stdout_noise[:-20]
 
     def _read_stderr(self) -> None:
         assert self.proc and self.proc.stderr
@@ -496,19 +615,75 @@ class AcpConnection:
         with self._resp_lock:
             self._responses[rid] = q
         try:
-            self._send({"jsonrpc": "2.0", "id": rid, "method": method, "params": params})
             try:
-                res = q.get(timeout=timeout)
+                self._send(
+                    {"jsonrpc": "2.0", "id": rid, "method": method, "params": params}
+                )
+            except OSError as exc:
+                # The child may have exited before the request was written
+                # (e.g. rejected CLI flags). Surface that, not a broken pipe.
+                raise AcpError(
+                    f"Failed to send RPC method '{method}' to ACP subprocess: {exc}"
+                    + self._exit_suffix()
+                ) from exc
+            deadline = time.monotonic() + timeout
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise AcpError(
+                        f"Timeout ({timeout}s) waiting for response to RPC method "
+                        f"'{method}' (id={rid})"
+                    )
+                try:
+                    res = q.get(timeout=min(0.1, remaining))
+                except queue.Empty:
+                    # A subprocess that already exited will never answer; report
+                    # why (e.g. unknown CLI flags) instead of a bare timeout.
+                    if not self.is_alive():
+                        # The stdout reader may still be queuing a response
+                        # written just before the exit.
+                        res = self._response_after_exit(q)
+                        if res is None:
+                            raise AcpError(
+                                f"ACP subprocess exited (exit_code="
+                                f"{self.proc.poll() if self.proc else None}) before "
+                                f"responding to RPC method '{method}' (id={rid})"
+                                + self._exit_suffix()
+                            )
+                    else:
+                        continue
                 if "error" in res:
                     err = res["error"]
                     err_msg = err.get("message") if isinstance(err, dict) else str(err)
                     raise AcpError(f"RPC error on {method}: {err_msg}")
                 return res.get("result", {})
-            except queue.Empty:
-                raise AcpError(f"Timeout ({timeout}s) waiting for response to RPC method '{method}' (id={rid})")
         finally:
             with self._resp_lock:
                 self._responses.pop(rid, None)
+
+    def _response_after_exit(self, q: "queue.Queue[Dict[str, Any]]") -> Optional[Dict[str, Any]]:
+        """Return a response already read from a just-exited process, if any."""
+        if self._stdout_thread is not None:
+            self._stdout_thread.join(timeout=0.5)
+        try:
+            return q.get_nowait()
+        except queue.Empty:
+            return None
+
+    def _exit_suffix(self) -> str:
+        # Give the stderr reader a moment to drain output written just before exit.
+        if self._stderr_thread is not None:
+            self._stderr_thread.join(timeout=0.5)
+        parts = []
+        stderr_snippet = "\n".join(self.stderr_chunks).strip()
+        if stderr_snippet:
+            parts.append(f"stderr: {stderr_snippet[-1000:]}")
+        stdout_snippet = "\n".join(self.stdout_noise).strip()
+        if stdout_snippet:
+            parts.append(f"non-JSON stdout: {stdout_snippet[-1000:]}")
+        if not parts:
+            return ""
+        return "; " + "; ".join(parts)
 
     def notify(self, method: str, params: Dict[str, Any]) -> None:
         self._send({"jsonrpc": "2.0", "method": method, "params": params})
@@ -989,6 +1164,126 @@ class AcpClientBackend:
             worker_tool_terminal: Dict[str, str] = {}
             usage_acc: Dict[str, Any] = {}
 
+            def handle_client_request(client_req: Dict[str, Any]) -> None:
+                method = client_req.get("method")
+                if method in ("session/request_permission", "request_permission"):
+                    self._handle_permission_request(client_req, conn, permissions)
+                elif method == "elicitation/create":
+                    record = self._handle_elicitation_request(
+                        client_req,
+                        conn,
+                        on_elicitation_create=on_elicitation_create,
+                        cancel_event=cancel_event,
+                        deadline_monotonic=deadline_monotonic,
+                        connection_token=connection_token,
+                    )
+                    elicitations.append(record)
+
+            def handle_notification(notif: Dict[str, Any]) -> None:
+                nonlocal stop_reason
+                method = notif.get("method")
+                params = notif.get("params") or {}
+                if method in ("session/update", "update"):
+                    # Flat shapes plus the spec-shaped nested update form
+                    # (params.update.sessionUpdate with content.text), as
+                    # observed in Phase 0 artifacts for both profiles.
+                    nested = params.get("update")
+                    if not isinstance(nested, dict):
+                        nested = None
+                    kind = (
+                        str(nested.get("sessionUpdate"))
+                        if nested and nested.get("sessionUpdate")
+                        else None
+                    )
+
+                    # Only assistant message text becomes the worker output.
+                    # Thought chunks are delivered via on_update_callback for
+                    # separate display and must not leak into the final worker
+                    # message. Flat (non-spec) shapes carry no kind and are
+                    # treated as assistant message text.
+                    if kind in (None, "agent_message_chunk"):
+                        texts: List[str] = []
+                        top_text = params.get("text")
+                        if isinstance(top_text, str) and top_text:
+                            texts.append(top_text)
+                        top_content = params.get("content")
+                        if isinstance(top_content, str) and top_content:
+                            texts.append(top_content)
+                        elif isinstance(top_content, dict) and isinstance(
+                            top_content.get("text"), str
+                        ):
+                            texts.append(top_content["text"])
+                        if nested is not None:
+                            texts.extend(_extract_content_text(nested.get("content")))
+                        flat_part = params.get("part")
+                        if (
+                            isinstance(flat_part, dict)
+                            and flat_part.get("type") == "text"
+                            and isinstance(flat_part.get("text"), str)
+                        ):
+                            texts.append(flat_part["text"])
+                        output_chunks.extend(texts)
+
+                    kind_key = kind if kind else "flat"
+                    update_kinds[kind_key] = update_kinds.get(kind_key, 0) + 1
+
+                    if kind in ("tool_call", "tool_call_update") and isinstance(nested, dict):
+                        tc_id = nested.get("toolCallId") or nested.get("tool_call_id")
+                        raw_status = str(nested.get("status") or "")
+                        # Terminal Worker tool states only; pending/in_progress
+                        # must not inflate the count and each toolCallId is
+                        # counted once (no double counting across updates).
+                        if tc_id and raw_status in ("completed", "failed"):
+                            worker_tool_terminal[str(tc_id)] = raw_status
+                    if kind == "usage_update" and isinstance(nested, dict):
+                        _merge_usage(usage_acc, _extract_usage_numbers(nested))
+                        for uk in ("usage", "tokens", "tokenUsage"):
+                            _merge_usage(usage_acc, _extract_usage_numbers(nested.get(uk)))
+
+                    sr = params.get("stop_reason") or params.get("stopReason")
+                    if sr:
+                        stop_reason = str(sr)
+
+                    if on_update_callback:
+                        try:
+                            on_update_callback(params)
+                        except Exception:
+                            pass
+                else:
+                    # Unknown/custom notifications are never executed, only
+                    # counted for the typed-update audit below.
+                    other_key = f"ignored:{method}"
+                    update_kinds[other_key] = update_kinds.get(other_key, 0) + 1
+
+            def drain_after_response() -> None:
+                """Collect updates emitted after the prompt response.
+
+                OpenCode 2.x sends the final ``agent_message_chunk`` and
+                ``usage_update`` *after* the ``session/prompt`` result, so the
+                response alone is not the end of the stream. Keep consuming
+                until the stream is quiet, bounded so a chatty agent cannot
+                hold the turn open or run past the turn deadline.
+                """
+                idle_deadline = time.monotonic() + RESPONSE_DRAIN_IDLE_S
+                hard_deadline = min(
+                    time.monotonic() + RESPONSE_DRAIN_MAX_S, deadline_monotonic
+                )
+                while time.monotonic() < hard_deadline:
+                    saw_message = False
+                    for client_req in conn.pop_client_requests():
+                        saw_message = True
+                        handle_client_request(client_req)
+                    for notif in conn.pop_notifications():
+                        saw_message = True
+                        handle_notification(notif)
+                    if saw_message:
+                        idle_deadline = min(
+                            time.monotonic() + RESPONSE_DRAIN_IDLE_S, hard_deadline
+                        )
+                    elif time.monotonic() >= idle_deadline:
+                        return
+                    time.sleep(0.05)
+
             while True:
                 # Check cancellation
                 if cancel_event and cancel_event.is_set():
@@ -1010,100 +1305,21 @@ class AcpClientBackend:
 
                 # Check client requests (permissions + elicitations)
                 for client_req in conn.pop_client_requests():
-                    method = client_req.get("method")
-                    if method in ("session/request_permission", "request_permission"):
-                        self._handle_permission_request(client_req, conn, permissions)
-                    elif method == "elicitation/create":
-                        record = self._handle_elicitation_request(
-                            client_req,
-                            conn,
-                            on_elicitation_create=on_elicitation_create,
-                            cancel_event=cancel_event,
-                            deadline_monotonic=deadline_monotonic,
-                            connection_token=connection_token,
-                        )
-                        elicitations.append(record)
+                    handle_client_request(client_req)
 
                 # Process notifications (updates)
                 for notif in conn.pop_notifications():
-                    method = notif.get("method")
-                    params = notif.get("params") or {}
-                    if method in ("session/update", "update"):
-                        # Flat shapes plus the spec-shaped nested update form
-                        # (params.update.sessionUpdate with content.text), as
-                        # observed in Phase 0 artifacts for both profiles.
-                        nested = params.get("update")
-                        if not isinstance(nested, dict):
-                            nested = None
-                        kind = (
-                            str(nested.get("sessionUpdate"))
-                            if nested and nested.get("sessionUpdate")
-                            else None
-                        )
-
-                        # Only assistant message text becomes the worker output.
-                        # Thought chunks are delivered via on_update_callback for
-                        # separate display and must not leak into the final worker
-                        # message. Flat (non-spec) shapes carry no kind and are
-                        # treated as assistant message text.
-                        if kind in (None, "agent_message_chunk"):
-                            texts: List[str] = []
-                            top_text = params.get("text")
-                            if isinstance(top_text, str) and top_text:
-                                texts.append(top_text)
-                            top_content = params.get("content")
-                            if isinstance(top_content, str) and top_content:
-                                texts.append(top_content)
-                            elif isinstance(top_content, dict) and isinstance(
-                                top_content.get("text"), str
-                            ):
-                                texts.append(top_content["text"])
-                            if nested is not None:
-                                texts.extend(_extract_content_text(nested.get("content")))
-                            flat_part = params.get("part")
-                            if (
-                                isinstance(flat_part, dict)
-                                and flat_part.get("type") == "text"
-                                and isinstance(flat_part.get("text"), str)
-                            ):
-                                texts.append(flat_part["text"])
-                            output_chunks.extend(texts)
-
-                        kind_key = kind if kind else "flat"
-                        update_kinds[kind_key] = update_kinds.get(kind_key, 0) + 1
-
-                        if kind in ("tool_call", "tool_call_update") and isinstance(nested, dict):
-                            tc_id = nested.get("toolCallId") or nested.get("tool_call_id")
-                            raw_status = str(nested.get("status") or "")
-                            # Terminal Worker tool states only; pending/in_progress
-                            # must not inflate the count and each toolCallId is
-                            # counted once (no double counting across updates).
-                            if tc_id and raw_status in ("completed", "failed"):
-                                worker_tool_terminal[str(tc_id)] = raw_status
-                        if kind == "usage_update" and isinstance(nested, dict):
-                            _merge_usage(usage_acc, _extract_usage_numbers(nested))
-                            for uk in ("usage", "tokens", "tokenUsage"):
-                                _merge_usage(usage_acc, _extract_usage_numbers(nested.get(uk)))
-
-                        sr = params.get("stop_reason") or params.get("stopReason")
-                        if sr:
-                            stop_reason = str(sr)
-
-                        if on_update_callback:
-                            try:
-                                on_update_callback(params)
-                            except Exception:
-                                pass
-                    else:
-                        # Unknown/custom notifications are never executed, only
-                        # counted for the typed-update audit below.
-                        other_key = f"ignored:{method}"
-                        update_kinds[other_key] = update_kinds.get(other_key, 0) + 1
+                    handle_notification(notif)
 
                 # Check prompt RPC response completion
                 res = conn.wait_for_response(prompt_req_id, timeout=poll_interval)
                 if res is not None:
                     prompt_response = res
+                    # Only 2.x agents were observed emitting updates after the
+                    # response; skipping the drain for 1.x avoids a needless
+                    # idle wait per turn.
+                    if (self.profile.cli_major_version or 2) >= 2:
+                        drain_after_response()
                     break
 
                 # Check process exit prematurely

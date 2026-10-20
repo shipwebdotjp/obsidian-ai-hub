@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -32,19 +33,93 @@ def test_coding_acp_turn_timeout_config():
 
 
 def test_acp_launch_profile():
-    p_opencode = acp.AcpLaunchProfile.get_profile("opencode")
+    with patch.object(acp, "_opencode_cli_major_version", return_value=2):
+        p_opencode = acp.AcpLaunchProfile.get_profile("opencode")
     assert p_opencode.profile_id == "opencode_acp"
     assert p_opencode.backend_name == "opencode"
     assert p_opencode.supports_resume is True
-    assert p_opencode.argv == [
-        p_opencode.executable, "acp", "--hostname", "127.0.0.1", "--port", "0",
-    ]
+    assert p_opencode.argv == [p_opencode.executable, "acp"]
 
     with pytest.raises(ValueError):
         acp.AcpLaunchProfile.get_profile("unknown")
 
     with pytest.raises(ValueError):
         acp.AcpLaunchProfile.get_profile("codex")
+
+
+def test_acp_launch_profile_legacy_cli_keeps_serve_flags():
+    with patch.object(acp, "_opencode_cli_major_version", return_value=1):
+        p_opencode = acp.AcpLaunchProfile.get_profile("opencode")
+    assert p_opencode.argv == [
+        p_opencode.executable, "acp", "--hostname", "127.0.0.1", "--port", "0",
+    ]
+    assert p_opencode.cli_major_version == 1
+    assert p_opencode.expected_version == "1.18.31"
+
+
+def test_opencode_cli_major_version_parsing():
+    completed = MagicMock(returncode=0, stdout="opencode v2.0.32\n", stderr="Node v24.1.0\n")
+    with patch.object(acp.subprocess, "run", return_value=completed):
+        assert acp._probe_opencode_cli_major_version("opencode") == 2
+
+    # stderr falls back only when the CLI's stdout has no version.
+    completed = MagicMock(returncode=0, stdout="", stderr="opencode v1.18.31\n")
+    with patch.object(acp.subprocess, "run", return_value=completed):
+        assert acp._probe_opencode_cli_major_version("opencode") == 1
+
+    completed = MagicMock(returncode=0, stdout="1.18.31\n", stderr="")
+    with patch.object(acp.subprocess, "run", return_value=completed):
+        assert acp._probe_opencode_cli_major_version("opencode") == 1
+
+    # Unknown/unparseable versions use the current (2.x) CLI contract.
+    completed = MagicMock(returncode=1, stdout="", stderr="boom")
+    with patch.object(acp.subprocess, "run", return_value=completed):
+        assert acp._probe_opencode_cli_major_version("opencode") is None
+
+    with patch.object(acp.subprocess, "run", side_effect=OSError("missing")):
+        assert acp._probe_opencode_cli_major_version("opencode") is None
+        assert acp._opencode_cli_major_version("definitely-not-installed") == 2
+
+
+def test_opencode_cli_major_version_is_cached_per_binary(tmp_path):
+    binary = tmp_path / "opencode"
+    binary.write_text("#!/bin/sh\necho v2.0.32\n")
+    binary.chmod(0o755)
+    acp._CLI_MAJOR_CACHE.clear()
+    try:
+        with patch.object(
+            acp, "_probe_opencode_cli_major_version", return_value=2
+        ) as probe:
+            assert acp._opencode_cli_major_version(str(binary)) == 2
+            assert acp._opencode_cli_major_version(str(binary)) == 2
+            assert probe.call_count == 1
+
+            # Same byte length on purpose: only the mtime bump may change the key.
+            binary.write_text("#!/bin/sh\necho v1.2.32\n")
+            before = binary.stat()
+            os.utime(binary, ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000_000))
+            assert binary.stat().st_mtime_ns != before.st_mtime_ns
+            probe.return_value = 1
+            assert acp._opencode_cli_major_version(str(binary)) == 1
+            assert probe.call_count == 2
+    finally:
+        acp._CLI_MAJOR_CACHE.clear()
+
+
+def test_opencode_cli_probe_failure_is_not_cached(tmp_path):
+    binary = tmp_path / "opencode"
+    binary.write_text("#!/bin/sh\n")
+    binary.chmod(0o755)
+    acp._CLI_MAJOR_CACHE.clear()
+    try:
+        with patch.object(
+            acp, "_probe_opencode_cli_major_version", return_value=None
+        ) as probe:
+            assert acp._opencode_cli_major_version(str(binary)) == 2
+            assert acp._opencode_cli_major_version(str(binary)) == 2
+            assert probe.call_count == 2
+    finally:
+        acp._CLI_MAJOR_CACHE.clear()
 
 
 def test_acp_connection_json_rpc():
@@ -63,6 +138,43 @@ def test_acp_connection_json_rpc():
     conn._send.assert_called_with(
         {"jsonrpc": "2.0", "method": "test_notify", "params": {"a": 1}}
     )
+
+
+def test_acp_connection_request_reports_exited_subprocess():
+    """A subprocess that exits before replying yields exit/stderr, not a timeout."""
+    conn = acp.AcpConnection(
+        argv=["sh", "-c", 'read _; echo "Unrecognized flag: --hostname" >&2; exit 2'],
+        cwd="/tmp",
+    )
+    conn.start()
+    try:
+        with pytest.raises(acp.AcpError) as excinfo:
+            conn.request("initialize", {}, timeout=5.0)
+    finally:
+        conn.terminate(grace_s=1.0)
+
+    message = str(excinfo.value)
+    assert "exited" in message
+    assert "Unrecognized flag: --hostname" in message
+    assert "Timeout" not in message
+
+
+def test_acp_connection_request_reports_stdout_noise_on_exit():
+    """CLI help printed to stdout (v2 unknown-flag behavior) is reported on exit."""
+    conn = acp.AcpConnection(
+        argv=["sh", "-c", 'read _; echo "USAGE: opencode acp"; exit 0'],
+        cwd="/tmp",
+    )
+    conn.start()
+    try:
+        with pytest.raises(acp.AcpError) as excinfo:
+            conn.request("initialize", {}, timeout=5.0)
+    finally:
+        conn.terminate(grace_s=1.0)
+
+    message = str(excinfo.value)
+    assert "exited" in message
+    assert "USAGE: opencode acp" in message
 
 
 def _permission_req(rid, options):
@@ -453,8 +565,9 @@ def test_acp_turn_records_typed_updates_and_agent_info():
 
 
 def test_acp_agent_version_mismatch_warns(caplog):
-    profile = acp.AcpLaunchProfile.get_profile("opencode")
-    assert profile.expected_version == "1.18.31"
+    with patch.object(acp, "_opencode_cli_major_version", return_value=2):
+        profile = acp.AcpLaunchProfile.get_profile("opencode")
+    assert profile.expected_version == "2.0.32"
     client = acp.AcpClientBackend(profile)
 
     with patch.object(acp.AcpConnection, "start"), \

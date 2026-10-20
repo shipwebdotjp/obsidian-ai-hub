@@ -64,7 +64,26 @@ secret値のartifact混入なし（自動検査済み）を確認。
 | profile | 必須 capability | 任意 capability | 未対応時の fallback | 既知不具合と version 範囲 |
 | --- | --- | --- | --- | --- |
 | codex-acp | protocol v1、`session/new`、`session/prompt`（text）、`session/update` 受信、`session/cancel` | `loadSession`、`sessionCapabilities.resume`（再開は不可のためPhase 1では不使用）、`additionalDirectories`、`subagents`、`mcp http` | resume/load失敗時は新規session化＋理由・旧/新IDをevent保存（エラー本文推測をしない）。`$/cancel_request` には依存しない | 再起動後のresume/loadはadvertiseがあっても `-32603 no rollout found` で失敗（1.11.0実測）。`_auth/status_update` 等の `_` prefix custom通知が来る（1.11.0実測、specのextensibility範囲内として受容・未知updateはredacted保存） |
-| opencode-acp | protocol v1、`session/new`、`session/prompt`（text）、`session/update` 受信、`session/cancel` | `loadSession`、`sessionCapabilities.resume`（再起動後も成功することを確認）、`mcp http/sse`、`prompt embeddedContext/image` | resume失敗時はcodex同様に新規化＋記録。`$/cancel_request` には依存しない | (1) 引数なし `opencode acp` は `ServeError` で即死する（1.18.31実測）。`--hostname 127.0.0.1 --port 0` の明示が必須 → profile argvに固定。(2) stdoutに `[..] WARN .. mDNS enabled but hostname is loopback` の非JSON行が混入する（1.18.31実測）。Clientはstdout汚染を検出・記録できること |
+| opencode-acp | protocol v1、`session/new`、`session/prompt`（text）、`session/update` 受信、`session/cancel` | `loadSession`、`sessionCapabilities.resume`（再起動後も成功することを確認）、`mcp http/sse`、`prompt embeddedContext/image` | resume失敗時はcodex同様に新規化＋記録。`$/cancel_request` には依存しない | (1) 起動 argv は CLI のメジャーバージョンで切り替える（下記「OpenCode 2.x での再検証」）。1.18.31 は `--hostname 127.0.0.1 --port 0` の明示が必須、2.x は同フラグを `Unrecognized flag` として拒否する。(2) stdoutに `[..] WARN .. mDNS enabled but hostname is loopback` の非JSON行が混入する（1.18.31実測）。Clientはstdout汚染を検出・記録できること |
+
+## OpenCode 2.x での再検証（2026-10-21）
+
+OpenCode CLI を v2 へ更新すると、`opencode acp --hostname 127.0.0.1 --port 0` は
+`Unrecognized flag: --hostname` / `--port` を出力して即終了し、ACP `initialize` が
+応答を得られずタイムアウトしていた（実行結果 `waiting_user: Timeout (15.0s) ... 'initialize'`）。
+v2 の `opencode acp` はホスト/ポート指定なしの stdio サーバとして動作する。
+
+- 2.0.32 実測: `opencode acp`（追加フラグなし）で `initialize` → `session/new` →
+  `session/set_config_option`（`model` / `thought_level` の `effort`）→ `session/prompt`
+  → `end_turn` が成功。`sessionCapabilities` は `additionalDirectories` / `close` /
+  `delete` / `fork` / `list` / `resume` を広告し、別プロセスからの `session/resume` も成功する。
+  `configOptions` は `model`（`category: model`）、`effort`（`category: thought_level`、
+  `low` / `high` / `max` / `default`）、`mode` を返す。
+- 実装は起動前に `opencode --version` を実行してメジャーバージョンを判定し、
+  1.x は従来フラグ付き、2.x 以降と判定不能時は `opencode acp` のみで起動する。
+  子プロセスが応答前に終了した場合は、タイムアウトではなく終了コードと
+  stderr / 非JSON stdout（CLIヘルプ等）を含むエラーとして報告する。
+
 
 ## session/request_permission の実測形状（OpenCode 1.18.31）
 

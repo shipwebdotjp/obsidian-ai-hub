@@ -150,6 +150,10 @@ def test_acp_turn_excludes_thought_from_output():
         {"method": "session/update", "params": {"update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": " world"}}}},
     ]
     received: list = []
+    pending = [list(updates)]
+
+    def fake_pop_notifications():
+        return pending.pop(0) if pending else []
 
     with patch.object(acp.AcpConnection, "start"), \
          patch.object(acp.AcpConnection, "is_alive", return_value=True), \
@@ -167,8 +171,9 @@ def test_acp_turn_excludes_thought_from_output():
              "wait_for_response",
              return_value={"result": {"stopReason": "end_turn"}},
          ), \
-         patch.object(acp.AcpConnection, "pop_notifications", side_effect=[list(updates), []]), \
-         patch.object(acp.AcpConnection, "pop_client_requests", return_value=[]):
+         patch.object(acp.AcpConnection, "pop_notifications", side_effect=fake_pop_notifications), \
+         patch.object(acp.AcpConnection, "pop_client_requests", return_value=[]), \
+         patch.object(acp, "RESPONSE_DRAIN_IDLE_S", 0.0):
 
         res = client.execute_turn(
             repo_path="/tmp",
@@ -185,6 +190,54 @@ def test_acp_turn_excludes_thought_from_output():
         if isinstance(p.get("update"), dict)
     ]
     assert "agent_thought_chunk" in kinds
+
+
+def test_acp_turn_collects_updates_emitted_after_response():
+    """OpenCode 2.x sends the final message/usage after the prompt response."""
+    with patch.object(acp, "_opencode_cli_major_version", return_value=2):
+        profile = acp.AcpLaunchProfile.get_profile("opencode")
+    client = acp.AcpClientBackend(profile)
+
+    pending = [
+        # First poll (pre-response) yields nothing; the late batch becomes
+        # visible only once drain_after_response() starts polling.
+        [],
+        [
+            {"method": "session/update", "params": {"update": {"sessionUpdate": "available_commands_update"}}},
+            {"method": "session/update", "params": {"update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "late text"}}}},
+            {"method": "session/update", "params": {"update": {"sessionUpdate": "usage_update", "used": 42, "size": 100}}},
+        ],
+    ]
+
+    def fake_pop_notifications():
+        return pending.pop(0) if pending else []
+
+    with patch.object(acp.AcpConnection, "start"), \
+         patch.object(acp.AcpConnection, "is_alive", return_value=True), \
+         patch.object(acp.AcpConnection, "terminate", return_value=0), \
+         patch.object(acp.AcpConnection, "notify"), \
+         patch.object(
+             acp.AcpClientBackend,
+             "initialize",
+             return_value={"protocol_version": 1, "capabilities": {}},
+         ), \
+         patch.object(acp.AcpConnection, "request", return_value={"sessionId": "s1"}), \
+         patch.object(acp.AcpConnection, "send_request_async", return_value=5), \
+         patch.object(
+             acp.AcpConnection,
+             "wait_for_response",
+             return_value={"result": {"stopReason": "end_turn"}},
+         ), \
+         patch.object(acp.AcpConnection, "pop_notifications", side_effect=fake_pop_notifications), \
+         patch.object(acp.AcpConnection, "pop_client_requests", return_value=[]), \
+         patch.object(acp, "RESPONSE_DRAIN_IDLE_S", 0.0):
+
+        res = client.execute_turn(repo_path="/tmp", prompt="hi")
+
+    assert res.output == "late text"
+    assert res.stop_reason == "end_turn"
+    assert res.diagnostics["update_kinds"]["agent_message_chunk"] == 1
+    assert res.diagnostics["usage"] == {"used": 42, "size": 100}
 
 
 def test_worker_persists_acp_live_updates(tmp_path):

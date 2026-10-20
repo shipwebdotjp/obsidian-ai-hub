@@ -49,6 +49,7 @@ coding:
 
 ## Worker（OpenCode ACP）のモデルと reasoning effort
 
+- Worker は `opencode acp`（stdio）をサブプロセスとして起動します。起動引数はインストール済み CLI のメジャーバージョンに合わせて自動で切り替わるため、v1 系・v2 系のどちらでも設定変更は不要です。
 - 使用モデルは毎ターンの prompt 前に ACP の `session/set_config_option`（`configId: "model"`）で固定されます。拒否された場合、そのターンは失敗します。
 - モデルが reasoning effort（カテゴリ `thought_level`）を広告する場合、`max → xhigh → high → medium → low` の優先順で最初に利用できる値を同じく `session/set_config_option` で設定します。広告がない、または優先順の値がない場合は OpenCode の既定値で実行し、診断に広告値と未対応理由を記録します。設定が拒否された場合はフォールバックせず、そのターンを失敗させます。
 - セッション作成時・ステータスバーで選択できるモデルは `opencode_models` の許可リストに限られ、自由入力は拒否されます。
@@ -70,6 +71,7 @@ coding:
 
 - **Coordinator が応答しない / 委譲しない** — `coding.orchestrator` のプロバイダ・モデルと資格情報を確認します。
 - **Worker が起動しない** — `coding.cli.opencode_path` が実行可能な `opencode` を指しているか、PATH が通っているか確認します。
+- **実行直後に `initialize` のタイムアウトで失敗する** — OpenCode CLI の更新で起動引数が変わった可能性があります。実行結果のエラーメッセージに子プロセスの終了コードと stderr（例: `Unrecognized flag`）が出る場合は、CLI のバージョンと `opencode acp --help` の内容を確認してください。
 - **モデル変更が反映されない** — モデル変更は **次回送信から** 適用されます。また許可リスト外のモデルは拒否されます。
 
 ## 次に読む
