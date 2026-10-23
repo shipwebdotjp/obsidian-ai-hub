@@ -1694,10 +1694,12 @@ async def generate_agent_stream(
             tool_calls=tool_call_records,
         )
 
-        # Trigger initial session title generation if this is the first complete turn
+        # Trigger initial session title generation if this is the first complete turn.
+        # Ephemeral sessions keep their title: generating one would send the
+        # conversation content to another model for no retained benefit.
         session_id = session.get("session_id")
         session_title_updated: Optional[str] = None
-        if session_id and not session.get("title_is_edited"):
+        if session_id and not session.get("title_is_edited") and not session.get("is_ephemeral"):
             try:
                 session_msgs = await asyncio.to_thread(store.list_messages, session_id)
                 # First user+assistant turn completed when total stored messages == 2

@@ -727,6 +727,45 @@ async def test_agent_stream_generates_title_only_on_initial_turn():
 
 
 @pytest.mark.anyio
+async def test_agent_stream_skips_title_generation_for_ephemeral():
+    agent = store.create_agent(
+        name="Ephemeral Title Agent",
+        system_prompt="Helpful assistant",
+    )
+    session = store.create_session(agent["agent_id"], ephemeral=True)
+    assert session["is_ephemeral"] is True
+    user_msg, run = store.start_user_run(session["session_id"], "最初の質問")
+
+    mock_llm = MagicMock()
+    _configure_astream(
+        mock_llm,
+        [[AIMessageChunk(content="最初の回答")]],
+    )
+    mock_llm.bind_tools.return_value = mock_llm
+
+    with (
+        patch(
+            "obsidian_ai_hub.agents.runtime.create_langchain_llm", return_value=mock_llm
+        ),
+        patch(
+            "obsidian_ai_hub.agents.runtime.generate_session_title",
+            return_value="自動生成会話タイトル",
+        ) as mock_gen_title,
+    ):
+        async for _ in runtime.generate_agent_stream(
+            agent=agent,
+            session=session,
+            run=run,
+            history_messages=[user_msg],
+            user_content="最初の質問",
+        ):
+            pass
+        assert mock_gen_title.call_count == 0
+        updated_session = store.get_session(session["session_id"])
+        assert updated_session["title"] != "自動生成会話タイトル"
+
+
+@pytest.mark.anyio
 async def test_agent_stream_system_prompt_run_shell_notice():
     agent_with_shell = store.create_agent(
         name="Shell Agent",

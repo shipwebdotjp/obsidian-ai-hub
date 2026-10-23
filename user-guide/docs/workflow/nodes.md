@@ -114,7 +114,7 @@ schema に沿った JSON を型付きで後続 Node へ渡します。Agent Node
 - `model` — 必須。`max_tokens` — 必須の正整数。
 - `system_prompt` — Revision に固定する文字列。動的な差し込みはできません。整形は前段の
   [テキスト組立](nodes.md#text_template-nodeテキスト組立) Node で行います。
-- `reasoning_effort` — 任意。`openai` / `ollama` / `opencode_go` でのみ指定できます。
+- `reasoning_effort` — 任意。`openai` / `ollama` / `opencode_go` でのみ指定できます。`ollama`では`"none"`を指定するとThinking無効(`think=false`)になります。
 - `inputs` — 値または [型付き参照](data-flow.md) / 日時式のマッピングです。
 - `output_schema` — 必須。Agent Node と同じ JSON Schema サブセットです。出力は
   `nodes.<node_id>.output.<field>` として参照できます。

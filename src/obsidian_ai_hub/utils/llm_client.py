@@ -1057,6 +1057,8 @@ def create_langchain_llm(
       Ollama では num_predict へマッピングされる。
     reasoning_effort: ChatOpenAI では reasoning_effort (Responses APIでは
       reasoning.effort へ正規化)、Ollama では reasoning へマッピング。
+      ``"none"`` (大文字小文字を問わない) は Thinking 無効として
+      Ollama の ``reasoning=False`` (``think=false``) へ変換する。
     """
     cleaned_effort = reasoning_effort.strip() if isinstance(reasoning_effort, str) and reasoning_effort.strip() else None
 
@@ -1074,10 +1076,9 @@ def create_langchain_llm(
         return create_gemini_llm(model, temperature, max_tokens)
 
     if provider == "ollama":
-        ollama_options: dict[str, Any] = {}
-        if cleaned_effort is not None:
-            ollama_options["reasoning"] = cleaned_effort
-        return create_ollama_llm(model, temperature, max_tokens, **ollama_options)
+        return create_ollama_llm(
+            model, temperature, max_tokens, reasoning=cleaned_effort
+        )
 
     if provider == "local":
         return create_local_llama_llm(model, temperature, max_tokens)
@@ -1230,6 +1231,26 @@ def create_gemini_llm(model: str, temperature: float = 0.7, max_tokens: int = 51
     )
 
 
+def _normalize_ollama_reasoning(reasoning: str | bool | None) -> bool | str | None:
+    """Ollama の ``reasoning`` (``think``) 指定を正規化する。
+
+    ``"none"`` (大文字小文字・前後空白を問わない) は Thinking 無効の合言葉
+    として ``False`` へ変換する。それ以外の文字列は前後空白を除いて素通し
+    (``"low"`` / ``"medium"`` / ``"high"`` 等のレベル対応モデル用) し、空文字
+    は ``None`` (既定動作) に畳む。真偽値はそのまま返す。
+    """
+    if reasoning is None:
+        return None
+    if isinstance(reasoning, bool):
+        return reasoning
+    cleaned = reasoning.strip()
+    if not cleaned:
+        return None
+    if cleaned.lower() == "none":
+        return False
+    return cleaned
+
+
 def create_ollama_llm(
     model: str,
     temperature: float = 0.7,
@@ -1237,7 +1258,11 @@ def create_ollama_llm(
     *,
     reasoning: str | bool | None = None,
 ):
-    """Ollama 用 LangChain ChatModel を返す。"""
+    """Ollama 用 LangChain ChatModel を返す。
+
+    ``reasoning=False`` は Thinking 無効 (``think=false``)、``None`` はモデル
+    既定に委ねる。``reasoning="none"`` も無効として扱う。
+    """
     try:
         from langchain_ollama import ChatOllama
     except ImportError:
@@ -1247,10 +1272,9 @@ def create_ollama_llm(
         )
 
     options: dict[str, Any] = {}
-    if reasoning is not None:
-        cleaned = reasoning.strip() if isinstance(reasoning, str) else reasoning
-        if cleaned:
-            options["reasoning"] = cleaned
+    normalized = _normalize_ollama_reasoning(reasoning)
+    if normalized is not None:
+        options["reasoning"] = normalized
 
     return ChatOllama(
         model=model,
