@@ -65,6 +65,8 @@ interface AgentChatInputProps {
   onFormDragOver: (e: React.DragEvent<HTMLFormElement>) => void;
   onFormDragLeave: (e: React.DragEvent<HTMLFormElement>) => void;
   onFormDrop: (e: React.DragEvent<HTMLFormElement>) => void;
+  shouldAutoFocus?: boolean;
+  onAutoFocusComplete?: () => void;
 }
 
 /** チャット入力フッター（添付・スキルチップ・パレット・送信操作）。 */
@@ -112,11 +114,17 @@ export function AgentChatInput({
   onFormDragOver,
   onFormDragLeave,
   onFormDrop,
+  shouldAutoFocus,
+  onAutoFocusComplete,
 }: AgentChatInputProps) {
   const [chatSendMode] = useChatSendMode();
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
   const plusMenuRef = useRef<HTMLDivElement | null>(null);
   const vaultPickerRef = useRef<HTMLDivElement | null>(null);
+  // onAutoFocusComplete is an inline prop from AgentsPage; keep it in a ref so
+  // the auto-focus effect does not re-run on every parent re-render.
+  const onAutoFocusCompleteRef = useRef(onAutoFocusComplete);
+  onAutoFocusCompleteRef.current = onAutoFocusComplete;
 
   const focusInputSoon = () => {
     setTimeout(() => {
@@ -219,6 +227,12 @@ export function AgentChatInput({
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
   }, [inputText]);
+
+  useEffect(() => {
+    if (!shouldAutoFocus || !selectedSessionId) return;
+    chatInputRef.current?.focus();
+    onAutoFocusCompleteRef.current?.();
+  }, [selectedSessionId, shouldAutoFocus]);
 
   // Close the plus menu and template selector when clicking outside of them.
   // onClosePlusMenu is an inline prop; keep it in a ref so the listener is

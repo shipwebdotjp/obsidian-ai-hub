@@ -817,3 +817,17 @@ AgentsPage と CodingPage の左ペイン構造は共通のレイアウトを採
 
 - Frontend: `usePagination`（offset 算出・resetKey 復帰・クランプ）、`MemoryList`（limit/offset 送信・ページ送り）、`HitlPage`/`TaskAgentListPage`/`ExecutionLogPage` の既存ページング回帰を Vitest で確認。全体 505 passed、`tsc -b` clean。
 - Backend: `tests/test_memory_review_web.py` に `limit/offset/total` と全件（limit 省略）の後方互換を追加。`uv run pytest tests/` 1299 passed。
+## Agent 新規会話ショートカットと空会話の日次削除
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-10-23 |
+| カテゴリ | Web UI・AI エージェント・運用 |
+| 決定内容 | Agent 固有の `/agents/new/:agentId` は既存方式どおり空の Web chat session を即時作成して通常の `session_id` URL へ置換遷移する。遅延作成は導入せず、`cleanup_execution_logs_daily` と同じ処理で、前日以前の既定タイトル・メッセージなし chat session を削除する。 |
+
+### 理由と操作契約
+
+- Shortcut URL は入力・添付・スキル・キューなど既存の session 前提をそのまま使えるため、初回送信時の原子的 session/run 作成へ広く変更しない。
+- 日次 cleanup の正本は既存 `--cleanup-execution-logs`。対象は `session_id` で識別し、`source='chat'`、タイトル `新しい会話`、JST 当日より前の作成日時、message/run が 0 件のすべてを DELETE 直前に再検証する。
+- DB 操作は transaction 内で行い、条件を満たさなくなった行は削除しない。生成メディアが異常に紐付く場合も、行削除 commit 後にのみファイルを unlink する。失敗時は削除対象を変更せず例外を実行ログへ残す。
+

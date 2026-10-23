@@ -8,7 +8,7 @@ import sqlite3
 import uuid
 from collections import Counter
 from contextlib import contextmanager
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 from typing import Any, Generator, Optional, Sequence
 from zoneinfo import ZoneInfo
 
@@ -322,6 +322,7 @@ def _row_to_message(row: sqlite3.Row) -> dict[str, Any]:
 
 
 AGENT_SESSION_SOURCES = frozenset({"chat", "task", "workflow"})
+EMPTY_CHAT_SESSION_TITLE = "新しい会話"
 
 AGENT_NON_TERMINAL_STATUSES = frozenset({"queued", "running", "cancelling", "waiting_user"})
 AGENT_TERMINAL_STATUSES = frozenset({"succeeded", "failed", "cancelled", "interrupted"})
@@ -895,7 +896,7 @@ def create_session(
             raise FileNotFoundError(f"Agent '{agent_id}' not found.")
 
         session_id = f"asess_{uuid.uuid4().hex[:12]}"
-        clean_title = title.strip() if title and title.strip() else "新しい会話"
+        clean_title = title.strip() if title and title.strip() else EMPTY_CHAT_SESSION_TITLE
         now = _now_iso()
 
         if is_generated:
@@ -1284,6 +1285,89 @@ def delete_session(session_id: str, conn: Optional[sqlite3.Connection] = None) -
         return deleted
 
 
+def purge_empty_chat_sessions(
+    before_jst_date: date | None = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> int:
+    """Delete stale, untouched Web-chat sessions and return the removed count.
+
+    A session qualifies only when it was created before the supplied JST date,
+    still has the initial title, and has neither messages nor runs.  The final
+    DELETE repeats every predicate so a user turn that has already committed
+    when the DELETE re-checks wins by making the session ineligible; a turn
+    landing in the opposite window fails in start_user_run (FK error) and must
+    be retried.
+
+    When a caller supplies ``conn``, it owns the surrounding transaction and
+    therefore also owns post-commit media-file cleanup. The normal maintenance
+    path opens its own connection and unlinks affected media only after commit.
+    With a caller-owned connection, media rows are deleted in the same
+    transaction but the files are left to the caller (or the deferred orphan
+    sweeper) because a rollback must not lose them -- the same contract as
+    :func:`delete_session`.
+    """
+    target_date = before_jst_date or datetime.now(ZoneInfo("Asia/Tokyo")).date()
+    cutoff_utc = datetime.combine(
+        target_date, time.min, tzinfo=ZoneInfo("Asia/Tokyo")
+    ).astimezone(timezone.utc).isoformat()
+
+    with auto_connection(conn) as (active_conn, is_generated):
+        candidate_rows = active_conn.execute(
+            """
+            SELECT session_id
+            FROM agent_sessions
+            WHERE source = 'chat' AND title = ? AND created_at < ?
+            """,
+            (EMPTY_CHAT_SESSION_TITLE, cutoff_utc),
+        ).fetchall()
+        if not candidate_rows:
+            return 0
+
+        from obsidian_ai_hub.media import store as media_store
+
+        removed_paths: list[str] = []
+
+        def _purge() -> int:
+            removed_count = 0
+            for row in candidate_rows:
+                session_id = row["session_id"]
+                cursor = active_conn.execute(
+                    """
+                    DELETE FROM agent_sessions
+                    WHERE session_id = ?
+                      AND source = 'chat'
+                      AND title = ?
+                      AND created_at < ?
+                      AND NOT EXISTS (
+                          SELECT 1 FROM agent_messages
+                          WHERE agent_messages.session_id = agent_sessions.session_id
+                      )
+                      AND NOT EXISTS (
+                          SELECT 1 FROM agent_runs
+                          WHERE agent_runs.session_id = agent_sessions.session_id
+                      )
+                    """,
+                    (session_id, EMPTY_CHAT_SESSION_TITLE, cutoff_utc),
+                )
+                if cursor.rowcount <= 0:
+                    continue
+                removed_count += 1
+                removed_paths.extend(
+                    media_store.delete_generated_media_for_parent(
+                        "session", session_id, conn=active_conn
+                    )
+                )
+            return removed_count
+
+        if is_generated:
+            with active_conn:
+                removed_count = _purge()
+            media_store.unlink_media_paths(removed_paths)
+            return removed_count
+
+        return _purge()
+
+
 def list_messages(session_id: str, conn: Optional[sqlite3.Connection] = None) -> list[dict[str, Any]]:
     with auto_connection(conn) as (active_conn, _):
         cursor = active_conn.execute(
@@ -1396,7 +1480,7 @@ def start_user_run(
                 (run_id, session_id, message_id, now),
             )
 
-            if session["title"] == "新しい会話" and next_seq == 1:
+            if session["title"] == EMPTY_CHAT_SESSION_TITLE and next_seq == 1:
                 # Empty user text (image-only or context-ref-only) gets a
                 # placeholder title so the session does not keep the default
                 # "新しい会話" label.
@@ -1867,7 +1951,7 @@ def start_queued_run(
                     """,
                     (run_id, session_id, message_id, now),
                 )
-            if session["title"] == "新しい会話" and next_seq == 1:
+            if session["title"] == EMPTY_CHAT_SESSION_TITLE and next_seq == 1:
                 if clean_content:
                     title_source = clean_content
                 elif attachments_list:

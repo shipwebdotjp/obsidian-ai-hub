@@ -1,5 +1,5 @@
 import type { RefObject } from "react";
-import { ChevronRight, Settings } from "lucide-react";
+import { Check, ChevronRight, Link2, Settings } from "lucide-react";
 import type { Agent } from "../../api/types";
 
 interface AgentWorkspaceHeaderProps {
@@ -9,6 +9,8 @@ interface AgentWorkspaceHeaderProps {
   mobileDrawerTriggerRef: RefObject<HTMLButtonElement>;
   onOpenDrawer: () => void;
   onOpenEditForm: (agent: Agent) => void;
+  onCopyShortcutUrl: (agentId: string) => void;
+  shortcutUrlCopied: boolean;
 }
 
 /** 作業中エージェントのヘッダー（名称・プロンプト・設定編集）。 */
@@ -19,6 +21,8 @@ export function AgentWorkspaceHeader({
   mobileDrawerTriggerRef,
   onOpenDrawer,
   onOpenEditForm,
+  onCopyShortcutUrl,
+  shortcutUrlCopied,
 }: AgentWorkspaceHeaderProps) {
   return (
     <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
@@ -52,6 +56,15 @@ export function AgentWorkspaceHeader({
         </div>
       </div>
       <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => onCopyShortcutUrl(activeAgent.agent_id)}
+          className="inline-flex h-8 items-center gap-1 rounded border border-slate-300 bg-white px-2 text-xs text-slate-700 hover:bg-slate-50 cursor-pointer"
+          aria-label="新しい会話URLをコピー"
+        >
+          {shortcutUrlCopied ? <Check className="h-4 w-4 text-emerald-600" /> : <Link2 className="h-4 w-4" />}
+          <span>{shortcutUrlCopied ? "コピー済み" : "URL"}</span>
+        </button>
         <button
           type="button"
           onClick={() => onOpenEditForm(activeAgent)}

@@ -7,6 +7,7 @@ import { useDocumentTitle } from "./hooks/useDocumentTitle";
 import MemoryPage from "./features/memories/MemoryPage";
 import ResearchPage from "./features/research/ResearchPage";
 import AgentsPage from "./features/agents/AgentsPage";
+import NewAgentChatPage from "./features/agents/NewAgentChatPage";
 import CodingPage from "./features/coding/CodingPage";
 import HitlPage from "./features/hitl/HitlPage";
 import TaskAgentPage from "./features/task-agent/TaskAgentPage";
@@ -207,6 +208,7 @@ export default function App() {
           <Route path={ROUTES.MEMORIES} element={<MemoryPage />} />
           <Route path={ROUTES.RESEARCH} element={<ResearchPage />} />
           <Route path={ROUTES.AGENTS} element={<AgentsPage />} />
+          <Route path={ROUTES.AGENT_NEW} element={<NewAgentChatPage />} />
           <Route path={ROUTES.CODING} element={<CodingPage />} />
           <Route path={ROUTES.HITL} element={<HitlPage />} />
           <Route path={ROUTES.TASK_AGENT} element={<TaskAgentPage />} />

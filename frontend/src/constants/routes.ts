@@ -1,7 +1,10 @@
+const AGENT_NEW_BASE = "/agents/new";
+
 export const ROUTES = {
   MEMORIES: "/memories",
   RESEARCH: "/research",
   AGENTS: "/agents",
+  AGENT_NEW: `${AGENT_NEW_BASE}/:agentId`,
   CODING: "/coding",
   VAULT_SEARCH: "/vault-search",
   SUMMARY_DASHBOARD: "/summary-dashboard",
@@ -31,6 +34,10 @@ export const ROUTES = {
 
 export function taskAgentDetailPath(taskId: string): string {
   return `/task-agent/${encodeURIComponent(taskId)}`;
+}
+
+export function agentNewChatPath(agentId: string): string {
+  return `${AGENT_NEW_BASE}/${encodeURIComponent(agentId)}`;
 }
 
 export function workflowDetailPath(workflowId: string): string {

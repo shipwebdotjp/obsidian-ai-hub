@@ -31,22 +31,35 @@ def mask_sensitive_dict(d: Any) -> Any:
     return d
 
 
-def cleanup_old_logs_now(days: int = 30) -> None:
-    """One-shot cleanup of execution/LLM logs older than `days`.
+def cleanup_old_logs_now(days: int = 30) -> dict[str, int]:
+    """Clean old execution logs and stale empty Web-chat sessions.
 
-    Opens its own connection so the daily maintenance task can invoke it
-    without any in-flight command run. Does not touch job_state.
+    Empty chat sessions are retained through their creation day and become
+    eligible from the next JST day.  Each domain keeps its own transaction so
+    a failed session purge cannot partially roll back an already-completed log
+    cleanup; unexpected failures are propagated to the scheduled command.
     """
     conn = get_db_connection()
     try:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-        conn.execute("DELETE FROM llm_call_logs WHERE started_at < ?", (cutoff,))
-        conn.execute("DELETE FROM command_runs WHERE started_at < ?", (cutoff,))
-        conn.commit()
-    except Exception as e:
-        logger.warning("Failed to clean up old logs: %s", e)
+        with conn:
+            llm_result = conn.execute(
+                "DELETE FROM llm_call_logs WHERE started_at < ?", (cutoff,)
+            )
+            command_result = conn.execute(
+                "DELETE FROM command_runs WHERE started_at < ?", (cutoff,)
+            )
     finally:
         conn.close()
+
+    from obsidian_ai_hub.agents import store as agent_store
+
+    empty_sessions = agent_store.purge_empty_chat_sessions()
+    return {
+        "llm_call_logs": llm_result.rowcount,
+        "command_runs": command_result.rowcount,
+        "empty_agent_sessions": empty_sessions,
+    }
 
 
 def upsert_job_state(

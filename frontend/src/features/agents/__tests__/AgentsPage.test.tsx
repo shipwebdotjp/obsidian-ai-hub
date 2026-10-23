@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import AgentsPage from "../AgentsPage";
 import {
@@ -2734,6 +2734,39 @@ describe("AgentsPage", () => {
       });
     });
 
+    it("focuses the chat input after creating a new conversation", async () => {
+      const user = userEvent.setup();
+      const created = { ...sampleSession, session_id: "asess_focus_new", title: "新しい会話" };
+      mockCreateSession.mockResolvedValue({ session: created });
+      mockGetSessionDetail.mockImplementation(async (sessionId: string) => {
+        if (sessionId === created.session_id) {
+          return { session: created, agent: sampleAgent, messages: [], runs: [] };
+        }
+        return {
+          session: sampleSession,
+          agent: sampleAgent,
+          messages: [],
+          runs: [],
+        };
+      });
+
+      render(
+        <MemoryRouter initialEntries={["/agents"]}>
+          <AgentsPage />
+        </MemoryRouter>
+      );
+
+      await screen.findByText("明日の予定");
+      await user.click(screen.getByRole("button", { name: "＋ 新しい会話" }));
+
+      await waitFor(() => {
+        expect(mockCreateSession).toHaveBeenCalled();
+      });
+      await waitFor(() => {
+        expect(document.activeElement?.tagName).toBe("TEXTAREA");
+      });
+    });
+
     it("saves the session when a new conversation is created", async () => {
       const user = userEvent.setup();
       const created = { ...sampleSession, session_id: "asess_new", title: "新しい会話" };
@@ -2765,6 +2798,56 @@ describe("AgentsPage", () => {
       await waitFor(() => {
         expect(readLastViewedSessionId()).toBe("asess_new");
       });
+    });
+
+    it("fills the chat input from ?prompt= without sending and strips the query", async () => {
+      function SearchProbe() {
+        const location = useLocation();
+        return <div data-testid="search-probe" data-search={location.search} />;
+      }
+      render(
+        <MemoryRouter initialEntries={["/agents?session_id=asess_456&prompt=hello"]} >
+          <Routes>
+            <Route path="*" element={<><AgentsPage /><SearchProbe /></>} />
+          </Routes>
+        </MemoryRouter>
+      );
+
+      expect(
+        await screen.findByText("こんにちは！何かお手伝いできますか？")
+      ).toBeInTheDocument();
+
+      const input = screen.getByPlaceholderText(/^メッセージを入力/) as HTMLTextAreaElement;
+      await waitFor(() => {
+        expect(input.value).toBe("hello");
+      });
+      // 自動送信はしない。
+      expect(mockStartRun).not.toHaveBeenCalled();
+      // 消費後はクエリから除去される。
+      await waitFor(() => {
+        expect(screen.getByTestId("search-probe").getAttribute("data-search")).toBe(
+          "?session_id=asess_456",
+        );
+      });
+    });
+
+    it("does not overwrite an existing draft with ?prompt=", async () => {
+      sessionStorage.setItem("oaih:prompt-draft:agents:asess_456", "保存済み下書き");
+      render(
+        <MemoryRouter initialEntries={["/agents?session_id=asess_456&prompt=hello"]}>
+          <AgentsPage />
+        </MemoryRouter>
+      );
+
+      expect(
+        await screen.findByText("こんにちは！何かお手伝いできますか？")
+      ).toBeInTheDocument();
+
+      const input = screen.getByPlaceholderText(/^メッセージを入力/) as HTMLTextAreaElement;
+      await waitFor(() => {
+        expect(input.value).toBe("保存済み下書き");
+      });
+      expect(mockStartRun).not.toHaveBeenCalled();
     });
   });
 });

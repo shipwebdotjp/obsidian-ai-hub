@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { ChevronRight } from "lucide-react";
-import { useSessionPromptDraft } from "../../hooks/useSessionPromptDraft";
+import { readPromptDraft, useSessionPromptDraft } from "../../hooks/useSessionPromptDraft";
 import { AgentSidebar } from "./AgentSidebar";
 import { AgentFormPanel } from "./AgentFormPanel";
 import { AgentWorkspaceHeader } from "./AgentWorkspaceHeader";
@@ -15,12 +15,21 @@ import { usePaneResize } from "../../hooks/usePaneResize";
 import { useAgentChat } from "./useAgentChat";
 import { useAgentTemplates } from "./useAgentTemplates";
 import { useAgentsUiState } from "./useAgentsUiState";
+import { agentNewChatPath } from "../../constants/routes";
 
 export default function AgentsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
+  const navigate = useNavigate();
   const sessionIdParam = searchParams.get("session_id");
+  const promptParam = searchParams.get("prompt");
   const [actionError, setActionError] = useState<string | null>(null);
   const [chatError, setChatError] = useState<string | null>(null);
+  const [shortcutUrlCopied, setShortcutUrlCopied] = useState(false);
+  const shortcutUrlResetRef = useRef<number | null>(null);
+  const focusChatInput = Boolean(
+    (location.state as { focusChatInput?: boolean } | null)?.focusChatInput,
+  );
 
   // Holds the session_id to honor after sessions are loaded for the resolved agent.
   // Cleared after consumption so subsequent agent switches do not re-select it.
@@ -35,6 +44,8 @@ export default function AgentsPage() {
   // Async question-card operations must not leak into the newly selected
   // session after a switch; track the current selection in a ref.
   const selectedSessionIdRef = useRef<string | null>(null);
+  // ?prompt=... の消費キー。同一セッションへの再適用を一度だけにする。
+  const consumedPromptRef = useRef<string | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   // Vault ピッカーを開く前のパレット破棄状態。閉じる時に復元する。
   const paletteDismissedBeforePickerRef = useRef(false);
@@ -67,6 +78,23 @@ export default function AgentsPage() {
     selectedSessionIdRef.current = sessions.selectedSessionId;
   }, [sessions.selectedSessionId]);
 
+  useEffect(() => {
+    setShortcutUrlCopied(false);
+    if (shortcutUrlResetRef.current !== null) {
+      window.clearTimeout(shortcutUrlResetRef.current);
+      shortcutUrlResetRef.current = null;
+    }
+  }, [catalog.selectedAgentId]);
+
+  useEffect(() => {
+    return () => {
+      if (shortcutUrlResetRef.current !== null) {
+        window.clearTimeout(shortcutUrlResetRef.current);
+        shortcutUrlResetRef.current = null;
+      }
+    };
+  }, []);
+
   // Chat stream state
   // プロンプト下書きはセッションごとに sessionStorage へデバウンス保存・復元する。
   // 保存対象は入力テキストのみ（添付画像・APIキー等の秘密情報は含めない）。
@@ -77,6 +105,37 @@ export default function AgentsPage() {
     saveDraftFor: savePromptDraftFor,
     removeDraftFor: removePromptDraftFor,
   } = useSessionPromptDraft("agents", sessions.selectedSessionId);
+
+  // ?prompt=... があれば、確定済みセッションの入力欄へ一度だけ流し込む。
+  // 自動送信はしない。既存の入力・保存済み下書きは上書きしない。
+  // 消費後はクエリから除去し、履歴や共有 URL に残さない。
+  useEffect(() => {
+    if (!promptParam) return;
+    const sid = sessions.selectedSessionId;
+    if (!sid || sessions.loadedSessionId !== sid) return;
+    const key = `${sid}\u0000${promptParam}`;
+    if (consumedPromptRef.current !== key) {
+      consumedPromptRef.current = key;
+      if (inputText === "" && readPromptDraft("agents", sid) === "") {
+        setInputText(promptParam);
+      }
+    }
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("prompt");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [
+    promptParam,
+    sessions.selectedSessionId,
+    sessions.loadedSessionId,
+    inputText,
+    setInputText,
+    setSearchParams,
+  ]);
 
   const chat = useAgentChat({
     selectedSessionId: sessions.selectedSessionId,
@@ -182,9 +241,47 @@ export default function AgentsPage() {
     ui.setLeftPaneOpen(false);
   };
 
+  // 「＋ 新しい会話」ボタンからの作成成功後は、読み込み完了時に入力欄へフォーカスする。
+  // ref ではなく state で保持し、設定時に確実に再レンダーを起こす。
+  const [focusAfterCreate, setFocusAfterCreate] = useState(false);
+  const handleCreateSessionAndFocus = () => {
+    void sessions.handleCreateSession().then((createdId) => {
+      if (createdId) setFocusAfterCreate(true);
+    });
+  };
+
   const handleOpenEditForm = (agent: Parameters<typeof catalog.handleOpenEditForm>[0]) => {
     catalog.handleOpenEditForm(agent);
     templates.resetForEdit();
+  };
+
+  const handleCopyShortcutUrl = async (agentId: string) => {
+    setActionError(null);
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error("clipboard unavailable");
+      }
+      await navigator.clipboard.writeText(
+        new URL(agentNewChatPath(agentId), window.location.origin).toString(),
+      );
+      setShortcutUrlCopied(true);
+      if (shortcutUrlResetRef.current !== null) {
+        window.clearTimeout(shortcutUrlResetRef.current);
+      }
+      shortcutUrlResetRef.current = window.setTimeout(() => {
+        setShortcutUrlCopied(false);
+        shortcutUrlResetRef.current = null;
+      }, 2000);
+    } catch (error) {
+      console.error("Failed to copy agent shortcut URL:", error);
+      setShortcutUrlCopied(false);
+      setActionError("ショートカットURLのコピーに失敗しました。");
+    }
+  };
+
+  const handleAutoFocusComplete = () => {
+    setFocusAfterCreate(false);
+    navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
   };
 
   const { activeAgent } = catalog;
@@ -216,7 +313,7 @@ export default function AgentsPage() {
         sessions={sessions.sessions}
         selectedSessionId={sessions.selectedSessionId}
         onSelectSession={handleSelectSession}
-        onCreateSession={sessions.handleCreateSession}
+        onCreateSession={handleCreateSessionAndFocus}
         sessionSearchQuery={sessions.sessionSearchQuery}
         onSessionSearchQueryChange={sessions.setSessionSearchQuery}
         sessionSearchResults={sessions.sessionSearchResults}
@@ -314,6 +411,8 @@ export default function AgentsPage() {
               mobileDrawerTriggerRef={ui.mobileDrawerTriggerRef}
               onOpenDrawer={() => ui.setLeftPaneOpen(true)}
               onOpenEditForm={handleOpenEditForm}
+              onCopyShortcutUrl={handleCopyShortcutUrl}
+              shortcutUrlCopied={shortcutUrlCopied}
             />
 
             {/* Chat Messages View */}
@@ -404,6 +503,12 @@ export default function AgentsPage() {
               onFormDragOver={chat.handleFormDragOver}
               onFormDragLeave={chat.handleFormDragLeave}
               onFormDrop={chat.handleFormDrop}
+              shouldAutoFocus={
+                (focusChatInput || focusAfterCreate) &&
+                sessions.selectedSessionId !== null &&
+                sessions.loadedSessionId === sessions.selectedSessionId
+              }
+              onAutoFocusComplete={handleAutoFocusComplete}
             />
           </div>
         ) : (

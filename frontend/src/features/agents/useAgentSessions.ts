@@ -267,8 +267,8 @@ export function useAgentSessions({
   };
 
   // Session Actions
-  const handleCreateSession = async () => {
-    if (!selectedAgentId) return;
+  const handleCreateSession = async (): Promise<string | null> => {
+    if (!selectedAgentId) return null;
     onActionError(null);
     try {
       const res = await createAgentSession(selectedAgentId);
@@ -282,8 +282,10 @@ export function useAgentSessions({
         },
         { replace: true },
       );
+      return res.session.session_id;
     } catch (e: unknown) {
       onActionError("セッション作成に失敗しました: " + (e instanceof Error ? e.message : String(e)));
+      return null;
     }
   };
 
