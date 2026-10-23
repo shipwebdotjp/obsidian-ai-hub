@@ -88,6 +88,12 @@ export function useAgentSessions({
   const messageElementRefs = useRef(new Map<string, HTMLDivElement>());
   const pendingSearchTargetRef = useRef<{ sessionId: string; messageId: string } | null>(null);
 
+  // 一時会話は一覧に載らないため、選択中の同エージェントのものは維持する。
+  const keepEphemeralSelection = (agentId: string): boolean => {
+    const current = selectedSessionIdRef.current;
+    return !!current && ephemeralSessionAgentsRef.current.get(current) === agentId;
+  };
+
   const loadSessions = async (agentId: string) => {
     const loadToken = ++loadSessionsTokenRef.current;
     onActionError(null);
@@ -143,7 +149,9 @@ export function useAgentSessions({
               { replace: true },
             );
           }
-          if (res.sessions.length > 0) {
+          if (keepEphemeralSelection(agentId)) {
+            // 選択中の一時会話は維持し、解決不能な指定だけ掃除したことにする。
+          } else if (res.sessions.length > 0) {
             setSelectedSessionId(res.sessions[0].session_id);
           } else {
             setSelectedSessionId(null);
@@ -162,8 +170,12 @@ export function useAgentSessions({
           return res.sessions[0].session_id;
         });
       } else {
-        setSelectedSessionId(null);
-        setMessages([]);
+        // 一覧が空でも、選択中の一時会話（同エージェント）は維持する。
+        // 維持しない場合のみ選択解除し、メッセージ表示を空にする。
+        if (!keepEphemeralSelection(agentId)) {
+          setSelectedSessionId(null);
+          setMessages([]);
+        }
       }
       pendingSessionIdRef.current = null;
       pendingSourceRef.current = null;

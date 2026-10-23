@@ -2897,6 +2897,71 @@ describe("AgentsPage", () => {
       expect(sessionStorage.getItem("oaih:prompt-draft:agents:asess_eph_nodraft")).toBeNull();
     });
 
+    it("keeps the ephemeral session after the run completes with an empty history list", async () => {
+      const user = userEvent.setup();
+      const created = { ...sampleSession, session_id: "asess_eph_keep", title: "新しい会話", is_ephemeral: true };
+      mockListSessions.mockResolvedValue({ sessions: [] });
+      mockCreateSession.mockResolvedValue({ session: created });
+      mockGetSessionDetail.mockImplementation(async (sessionId: string) => {
+        if (sessionId === created.session_id) {
+          return {
+            session: created,
+            agent: sampleAgent,
+            messages: [
+              {
+                message_id: "msg_eph_1",
+                session_id: created.session_id,
+                sequence: 1,
+                role: "user",
+                content: "やあ",
+                created_at: "2026-08-20T00:00:00Z",
+              },
+              {
+                message_id: "msg_eph_2",
+                session_id: created.session_id,
+                sequence: 2,
+                role: "assistant",
+                content: "どうも",
+                created_at: "2026-08-20T00:00:01Z",
+              },
+            ],
+            runs: [],
+          };
+        }
+        return {
+          session: sampleSession,
+          agent: sampleAgent,
+          messages: [],
+          runs: [],
+        };
+      });
+      mockRunSuccess({ sessionId: created.session_id });
+
+      render(
+        <MemoryRouter initialEntries={["/agents"]}>
+          <AgentsPage />
+        </MemoryRouter>
+      );
+
+      expect(await screen.findByText("会話履歴がありません")).toBeInTheDocument();
+      await user.click(screen.getByRole("checkbox", { name: "一時会話として作成" }));
+      await user.click(screen.getByRole("button", { name: "＋ 新しい会話" }));
+
+      const input = await screen.findByPlaceholderText(/^メッセージを入力/);
+      await user.type(input, "やあ");
+      await user.click(screen.getByRole("button", { name: "送信" }));
+
+      // 実行完了後の履歴再取得（一覧は空）でも選択が維持され、会話が消えない。
+      expect(await screen.findByText("どうも")).toBeInTheDocument();
+      expect(screen.getByText("一時会話")).toBeInTheDocument();
+      expect(
+        screen.queryByText("メッセージを入力して会話を開始してください。"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByPlaceholderText(/^メッセージを入力/),
+      ).not.toBeDisabled();
+    });
+
     it("fills the chat input from ?prompt= without sending and strips the query", async () => {
       function SearchProbe() {
         const location = useLocation();
