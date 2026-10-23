@@ -117,6 +117,10 @@ class UpdatePromptTemplateRequest(BaseModel):
 
 class CreateSessionRequest(BaseModel):
     title: Optional[str] = Field(default=None, description="Session title")
+    ephemeral: bool = Field(
+        default=False,
+        description="Temporary conversation: hidden from lists, excluded from memory/logs, purged by TTL",
+    )
 
 
 class UpdateSessionRequest(BaseModel):
@@ -353,7 +357,7 @@ def list_sessions(agent_id: str) -> Dict[str, Any]:
 @router.post("/agents/{agent_id}/sessions", status_code=status.HTTP_201_CREATED)
 def create_session(agent_id: str, req: CreateSessionRequest) -> Dict[str, Any]:
     try:
-        session = agent_service.create_session(agent_id, title=req.title)
+        session = agent_service.create_session(agent_id, title=req.title, ephemeral=req.ephemeral)
         return {"session": session}
     except FileNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e

@@ -95,8 +95,8 @@ def search_messages(query: str) -> List[Dict[str, Any]]:
     return store.search_messages(query)
 
 
-def create_session(agent_id: str, title: Optional[str] = None) -> Dict[str, Any]:
-    return store.create_session(agent_id, title=title)
+def create_session(agent_id: str, title: Optional[str] = None, ephemeral: bool = False) -> Dict[str, Any]:
+    return store.create_session(agent_id, title=title, ephemeral=ephemeral)
 
 
 def get_session_detail(session_id: str) -> Dict[str, Any]:

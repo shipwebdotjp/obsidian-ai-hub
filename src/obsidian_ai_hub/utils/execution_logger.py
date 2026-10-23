@@ -1,6 +1,6 @@
 import json
 import logging
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from datetime import datetime, timezone, timedelta
 import traceback
 from typing import Any, Dict, List, Optional, Tuple
@@ -11,6 +11,29 @@ logger = logging.getLogger(__name__)
 
 # ContextVar to propagate run_id
 current_run_id: ContextVar[Optional[str]] = ContextVar("current_run_id", default=None)
+
+# Set while an ephemeral (temporary) agent conversation runs so its LLM
+# calls are never written to the execution log. The conversation rows
+# themselves are deleted by TTL purge, but llm_call_logs rows have no FK
+# cascade to agent runs and would otherwise be orphaned.
+_suppress_execution_logging: ContextVar[bool] = ContextVar(
+    "suppress_execution_logging", default=False
+)
+
+
+def suppress_execution_logging() -> Token[bool]:
+    """Suppress LLM-call logging in the current context; reset with the token."""
+    return _suppress_execution_logging.set(True)
+
+
+def execution_logging_suppressed() -> bool:
+    """Return True when LLM-call logging is suppressed in the current context."""
+    return bool(_suppress_execution_logging.get())
+
+
+def reset_execution_logging(token: Token[bool]) -> None:
+    """Reset a token obtained from :func:`suppress_execution_logging`."""
+    _suppress_execution_logging.reset(token)
 
 
 def mask_sensitive_dict(d: Any) -> Any:
@@ -32,10 +55,11 @@ def mask_sensitive_dict(d: Any) -> Any:
 
 
 def cleanup_old_logs_now(days: int = 30) -> dict[str, int]:
-    """Clean old execution logs and stale empty Web-chat sessions.
+    """Clean old execution logs, stale empty Web-chat sessions, and ephemeral sessions.
 
     Empty chat sessions are retained through their creation day and become
-    eligible from the next JST day.  Each domain keeps its own transaction so
+    eligible from the next JST day. Ephemeral sessions are purged by idle TTL
+    regardless of messages.  Each domain keeps its own transaction so
     a failed session purge cannot partially roll back an already-completed log
     cleanup; unexpected failures are propagated to the scheduled command.
     """
@@ -55,10 +79,12 @@ def cleanup_old_logs_now(days: int = 30) -> dict[str, int]:
     from obsidian_ai_hub.agents import store as agent_store
 
     empty_sessions = agent_store.purge_empty_chat_sessions()
+    ephemeral_sessions = agent_store.purge_ephemeral_sessions()
     return {
         "llm_call_logs": llm_result.rowcount,
         "command_runs": command_result.rowcount,
         "empty_agent_sessions": empty_sessions,
+        "ephemeral_agent_sessions": ephemeral_sessions,
     }
 
 
@@ -491,6 +517,8 @@ def update_llm_call_tool_calls(
     call_id: str, tool_calls: List[Dict[str, Any]]
 ) -> None:
     """Updates the tool_calls_json column for an existing LLM call log row."""
+    if execution_logging_suppressed():
+        return
     conn = get_db_connection()
     try:
         formatted = [format_tool_call_item(tc) for tc in tool_calls]
@@ -522,6 +550,8 @@ def start_llm_call(
     tool_calls: Optional[List[Dict[str, Any]]] = None,
 ) -> None:
     """Logs the start of an LLM call."""
+    if execution_logging_suppressed():
+        return
     conn = get_db_connection()
     try:
         started_at = datetime.now(timezone.utc).isoformat()
@@ -555,6 +585,8 @@ def succeed_llm_call(
     tool_calls: Optional[List[Dict[str, Any]]] = None,
 ) -> None:
     """Logs the success of an LLM call."""
+    if execution_logging_suppressed():
+        return
     conn = get_db_connection()
     try:
         finished_at = datetime.now(timezone.utc).isoformat()
@@ -597,6 +629,8 @@ def fail_llm_call(
     status, request ID, attempt count, response-body summary) which are
     appended to the stored exception message as structured JSON.
     """
+    if execution_logging_suppressed():
+        return
     conn = get_db_connection()
     try:
         finished_at = datetime.now(timezone.utc).isoformat()

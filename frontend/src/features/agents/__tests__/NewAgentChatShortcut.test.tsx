@@ -225,10 +225,50 @@ describe("agent shortcut URL", () => {
         onOpenEditForm={() => {}}
         onCopyShortcutUrl={onCopy}
         shortcutUrlCopied={false}
+        isEphemeralSession={false}
+        onEndEphemeralSession={() => {}}
       />,
     );
     await user.click(screen.getByRole("button", { name: "新しい会話URLをコピー" }));
     expect(onCopy).toHaveBeenCalledWith("agent_123");
+  });
+
+  it("shows the ephemeral badge and end button instead of the copy button", async () => {
+    const user = userEvent.setup();
+    const onEnd = vi.fn();
+    render(
+      <AgentWorkspaceHeader
+        activeAgent={{ agent_id: "agent_123", name: "A" } as never}
+        leftPaneCollapsed={false}
+        onExpandPane={() => {}}
+        mobileDrawerTriggerRef={{ current: null } as never}
+        onOpenDrawer={() => {}}
+        onOpenEditForm={() => {}}
+        onCopyShortcutUrl={() => {}}
+        shortcutUrlCopied={false}
+        isEphemeralSession
+        onEndEphemeralSession={onEnd}
+      />,
+    );
+    expect(screen.getByText("一時会話")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "新しい会話URLをコピー" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "一時会話を終了して削除" }));
+    expect(onEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it("creates an ephemeral session when ?ephemeral=1 is given", async () => {
+    mockCreateSession.mockResolvedValue({
+      session: { session_id: "asess_eph_1", is_ephemeral: true },
+    } as never);
+
+    renderNewChatPage("/agents/new/agent_123?ephemeral=1");
+
+    await waitFor(() => {
+      expect(mockCreateSession).toHaveBeenCalledTimes(1);
+    });
+    expect(mockCreateSession).toHaveBeenCalledWith("agent_123", { ephemeral: true });
+    const probe = await screen.findByTestId("location-probe");
+    expect(probe.getAttribute("data-search")).toBe("?session_id=asess_eph_1");
   });
 });
 

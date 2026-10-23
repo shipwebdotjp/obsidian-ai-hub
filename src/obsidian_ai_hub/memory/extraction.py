@@ -744,6 +744,7 @@ def _load_weekly_agent_messages(
             FROM agent_messages m
             JOIN agent_sessions s ON s.session_id = m.session_id
             WHERE s.source = 'chat'
+              AND COALESCE(s.is_ephemeral, 0) = 0
               AND m.role IN ('user', 'assistant')
               AND m.created_at >= ? AND m.created_at < ?
               AND m.message_id NOT IN (

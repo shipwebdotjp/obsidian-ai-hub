@@ -973,7 +973,7 @@ export function searchAgentMessages(
 
 export function createAgentSession(
   agentId: string,
-  payload?: { title?: string },
+  payload?: { title?: string; ephemeral?: boolean },
 ): Promise<{ session: AgentSession }> {
   return request<{ session: AgentSession }>(
     `/api/v1/agents/${encodeURIComponent(agentId)}/sessions`,

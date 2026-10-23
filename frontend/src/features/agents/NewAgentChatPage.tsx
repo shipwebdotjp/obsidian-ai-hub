@@ -11,6 +11,8 @@ export default function NewAgentChatPage() {
   const [searchParams] = useSearchParams();
   // ?prompt=... があれば新規セッション遷移時に引き継ぐ（自動送信はしない）。
   const promptParam = searchParams.get("prompt") ?? "";
+  // ?ephemeral=1 があれば履歴を残さない一時会話として作成する。
+  const ephemeralParam = searchParams.get("ephemeral") === "1";
   // One in-flight/finished creation per agent id so StrictMode's remount and
   // same-mount revisits (A -> B -> A) reuse the promise instead of creating
   // a duplicate empty session. Same type as createAgentSession's return.
@@ -25,11 +27,15 @@ export default function NewAgentChatPage() {
       return;
     }
     // React Router reuses this component when only the param changes
-    // (/agents/new/A -> /agents/new/B); the map keys the guard per agent.
-    let pending = pendingByAgentRef.current.get(agentId) ?? null;
+    // (/agents/new/A -> /agents/new/B); the map keys the guard per agent
+    // (and per ephemeral flag).
+    const pendingKey = `${agentId}:${ephemeralParam}`;
+    let pending = pendingByAgentRef.current.get(pendingKey) ?? null;
     if (!pending) {
-      pending = createAgentSession(agentId);
-      pendingByAgentRef.current.set(agentId, pending);
+      pending = ephemeralParam
+        ? createAgentSession(agentId, { ephemeral: true })
+        : createAgentSession(agentId);
+      pendingByAgentRef.current.set(pendingKey, pending);
     }
 
     let cancelled = false;
@@ -39,7 +45,7 @@ export default function NewAgentChatPage() {
         // Drop the resolved entry so revisiting this shortcut URL starts a
         // fresh conversation; StrictMode remounts re-enter while the request
         // is still in flight and keep reusing the pending promise.
-        pendingByAgentRef.current.delete(agentId);
+        pendingByAgentRef.current.delete(pendingKey);
         if (cancelled) return;
         const target =
           `${ROUTES.AGENTS}?session_id=${encodeURIComponent(session.session_id)}` +
@@ -48,14 +54,14 @@ export default function NewAgentChatPage() {
       })
       .catch((cause: unknown) => {
         // Drop the cached failure so revisiting this URL retries creation.
-        pendingByAgentRef.current.delete(agentId);
+        pendingByAgentRef.current.delete(pendingKey);
         if (cancelled) return;
         setError(getErrorMessage(cause, "新しい会話を作成できませんでした。"));
       });
     return () => {
       cancelled = true;
     };
-  }, [agentId, navigate, promptParam]);
+  }, [agentId, navigate, promptParam, ephemeralParam]);
 
   if (error) {
     return (

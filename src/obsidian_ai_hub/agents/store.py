@@ -8,7 +8,7 @@ import sqlite3
 import uuid
 from collections import Counter
 from contextlib import contextmanager
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Generator, Optional, Sequence
 from zoneinfo import ZoneInfo
 
@@ -59,6 +59,10 @@ def _notify_agent_status_change(run: dict[str, Any]) -> None:
             sess = get_session(session_id)
             if sess and sess.get("title"):
                 session_title = sess["title"]
+            # Ephemeral (temporary) conversations must not leak into the
+            # notification store.
+            if sess and sess.get("is_ephemeral"):
+                return
         except Exception:
             pass
 
@@ -268,6 +272,10 @@ def _row_to_session(row: sqlite3.Row) -> dict[str, Any]:
         title_is_edited = bool(row["title_is_edited"])  # type: ignore[index]
     except (IndexError, KeyError, ValueError):
         title_is_edited = False
+    try:
+        is_ephemeral = bool(row["is_ephemeral"])  # type: ignore[index]
+    except (IndexError, KeyError, ValueError):
+        is_ephemeral = False
     return {
         "session_id": row["session_id"],
         "agent_id": row["agent_id"],
@@ -275,6 +283,7 @@ def _row_to_session(row: sqlite3.Row) -> dict[str, Any]:
         "title_is_edited": title_is_edited,
         "pinned_at": pinned_at,
         "source": _safe_row_get(row, "source"),
+        "is_ephemeral": is_ephemeral,
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
@@ -323,6 +332,10 @@ def _row_to_message(row: sqlite3.Row) -> dict[str, Any]:
 
 AGENT_SESSION_SOURCES = frozenset({"chat", "task", "workflow"})
 EMPTY_CHAT_SESSION_TITLE = "新しい会話"
+
+#: TTL for ephemeral (temporary) chat sessions. They are purged regardless
+#: of messages/runs once the session has been idle longer than this.
+EPHEMERAL_SESSION_TTL_HOURS = 24
 
 AGENT_NON_TERMINAL_STATUSES = frozenset({"queued", "running", "cancelling", "waiting_user"})
 AGENT_TERMINAL_STATUSES = frozenset({"succeeded", "failed", "cancelled", "interrupted"})
@@ -883,6 +896,7 @@ def create_session(
     agent_id: str,
     title: Optional[str] = None,
     source: str = "chat",
+    ephemeral: bool = False,
     conn: Optional[sqlite3.Connection] = None,
 ) -> dict[str, Any]:
     if source not in AGENT_SESSION_SOURCES:
@@ -898,9 +912,19 @@ def create_session(
         session_id = f"asess_{uuid.uuid4().hex[:12]}"
         clean_title = title.strip() if title and title.strip() else EMPTY_CHAT_SESSION_TITLE
         now = _now_iso()
+        ephemeral_flag = 1 if ephemeral else 0
 
-        if is_generated:
-            with active_conn:
+        def _insert(with_ephemeral: bool) -> None:
+            if with_ephemeral:
+                active_conn.execute(
+                    """
+                    INSERT INTO agent_sessions (session_id, agent_id, title, source, is_ephemeral, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (session_id, agent_id, clean_title, source, ephemeral_flag, now, now),
+                )
+            else:
+                # Pre-migration database without the is_ephemeral column.
                 active_conn.execute(
                     """
                     INSERT INTO agent_sessions (session_id, agent_id, title, source, created_at, updated_at)
@@ -908,33 +932,60 @@ def create_session(
                     """,
                     (session_id, agent_id, clean_title, source, now, now),
                 )
+
+        if is_generated:
+            with active_conn:
+                try:
+                    _insert(True)
+                except sqlite3.OperationalError as e:
+                    if "no such column: is_ephemeral" not in str(e):
+                        raise
+                    if ephemeral:
+                        raise ValueError(
+                            "ephemeral sessions require the is_ephemeral column (run migration v80)."
+                        ) from e
+                    _insert(False)
         else:
-            active_conn.execute(
-                """
-                INSERT INTO agent_sessions (session_id, agent_id, title, source, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (session_id, agent_id, clean_title, source, now, now),
-            )
+            try:
+                _insert(True)
+            except sqlite3.OperationalError as e:
+                if "no such column: is_ephemeral" not in str(e):
+                    raise
+                if ephemeral:
+                    raise ValueError(
+                        "ephemeral sessions require the is_ephemeral column (run migration v80)."
+                    ) from e
+                _insert(False)
 
         return get_session(session_id, conn=active_conn)  # type: ignore[return-value]
 
 
 def list_sessions(agent_id: str, conn: Optional[sqlite3.Connection] = None) -> list[dict[str, Any]]:
+    """List persistent sessions for an agent; ephemeral sessions are excluded."""
     with auto_connection(conn) as (active_conn, _):
+        base_query = (
+            "SELECT * FROM agent_sessions WHERE agent_id = ? AND "
+            "COALESCE(is_ephemeral, 0) = 0 ORDER BY (pinned_at IS NOT NULL) DESC, pinned_at DESC, updated_at DESC;"
+        )
         try:
-            cursor = active_conn.execute(
-                "SELECT * FROM agent_sessions WHERE agent_id = ? ORDER BY (pinned_at IS NOT NULL) DESC, pinned_at DESC, updated_at DESC;",
-                (agent_id,),
-            )
+            cursor = active_conn.execute(base_query, (agent_id,))
         except sqlite3.OperationalError as e:
-            if "no such column: pinned_at" in str(e):
+            if "no such column" not in str(e):
+                raise
+            # Pre-migration database without is_ephemeral/pinned_at columns.
+            try:
                 cursor = active_conn.execute(
-                    "SELECT * FROM agent_sessions WHERE agent_id = ? ORDER BY updated_at DESC;",
+                    "SELECT * FROM agent_sessions WHERE agent_id = ? ORDER BY (pinned_at IS NOT NULL) DESC, pinned_at DESC, updated_at DESC;",
                     (agent_id,),
                 )
-            else:
-                raise
+            except sqlite3.OperationalError as e2:
+                if "no such column: pinned_at" in str(e2):
+                    cursor = active_conn.execute(
+                        "SELECT * FROM agent_sessions WHERE agent_id = ? ORDER BY updated_at DESC;",
+                        (agent_id,),
+                    )
+                else:
+                    raise
         return [_row_to_session(row) for row in cursor.fetchall()]
 
 
@@ -956,6 +1007,7 @@ def list_daily_session_overviews(target_date: date) -> list[dict[str, Any]]:
                    agent_sessions.created_at, agents.name AS agent_name
             FROM agent_sessions
             INNER JOIN agents ON agents.agent_id = agent_sessions.agent_id
+            WHERE COALESCE(agent_sessions.is_ephemeral, 0) = 0
             ORDER BY agent_sessions.created_at ASC
             """
         ).fetchall()
@@ -1065,6 +1117,7 @@ def search_messages(
                 ON agent_sessions.session_id = agent_messages.session_id
             INNER JOIN agents ON agents.agent_id = agent_sessions.agent_id
             WHERE agent_messages.content LIKE ? ESCAPE '\\'
+              AND COALESCE(agent_sessions.is_ephemeral, 0) = 0
             ORDER BY agent_sessions.updated_at DESC, agent_messages.sequence DESC
             LIMIT ?;
             """,
@@ -1348,6 +1401,75 @@ def purge_empty_chat_sessions(
                       )
                     """,
                     (session_id, EMPTY_CHAT_SESSION_TITLE, cutoff_utc),
+                )
+                if cursor.rowcount <= 0:
+                    continue
+                removed_count += 1
+                removed_paths.extend(
+                    media_store.delete_generated_media_for_parent(
+                        "session", session_id, conn=active_conn
+                    )
+                )
+            return removed_count
+
+        if is_generated:
+            with active_conn:
+                removed_count = _purge()
+            media_store.unlink_media_paths(removed_paths)
+            return removed_count
+
+        return _purge()
+
+
+def purge_ephemeral_sessions(
+    ttl_hours: int = EPHEMERAL_SESSION_TTL_HOURS,
+    conn: Optional[sqlite3.Connection] = None,
+) -> int:
+    """Delete idle ephemeral (temporary) sessions and return the removed count.
+
+    Any ephemeral session whose ``updated_at`` is older than ``ttl_hours`` is
+    removed regardless of messages or runs; FK cascades delete the messages,
+    runs, and run events. The final DELETE repeats every predicate so a user
+    turn that races this maintenance task wins by making the session ineligible
+    (its ``updated_at`` moves past the cutoff).
+
+    When a caller supplies ``conn``, it owns the surrounding transaction and
+    therefore also owns post-commit media-file cleanup, mirroring
+    :func:`delete_session`. The normal maintenance path opens its own
+    connection and unlinks affected media only after commit.
+    """
+    cutoff_utc = (datetime.now(timezone.utc) - timedelta(hours=ttl_hours)).isoformat()
+
+    with auto_connection(conn) as (active_conn, is_generated):
+        if not _has_column(active_conn, "agent_sessions", "is_ephemeral"):
+            return 0
+        candidate_rows = active_conn.execute(
+            """
+            SELECT session_id
+            FROM agent_sessions
+            WHERE is_ephemeral = 1 AND updated_at < ?
+            """,
+            (cutoff_utc,),
+        ).fetchall()
+        if not candidate_rows:
+            return 0
+
+        from obsidian_ai_hub.media import store as media_store
+
+        removed_paths: list[str] = []
+
+        def _purge() -> int:
+            removed_count = 0
+            for row in candidate_rows:
+                session_id = row["session_id"]
+                cursor = active_conn.execute(
+                    """
+                    DELETE FROM agent_sessions
+                    WHERE session_id = ?
+                      AND is_ephemeral = 1
+                      AND updated_at < ?
+                    """,
+                    (session_id, cutoff_utc),
                 )
                 if cursor.rowcount <= 0:
                     continue

@@ -99,6 +99,7 @@ export function useSessionPromptDraft(
   page: PromptDraftPage,
   sessionId: string | null,
   debounceMs: number = PROMPT_DRAFT_DEBOUNCE_MS,
+  persistEnabled: boolean = true,
 ): SessionPromptDraft {
   const [draft, setDraftState] = useState("");
   const sessionRef = useRef<string | null>(sessionId);
@@ -108,6 +109,12 @@ export function useSessionPromptDraft(
   // 次の保存スケジュールを1回だけ抑止するフラグ。送信開始時の一時クリアや
   // 確定処理での入力付け替えが storage へ波及しないようにする。
   const skipSaveRef = useRef(false);
+  // 一時会話など storage へ残さない場合は保存・復元を全面抑止する。
+  // レンダー中の直接代入ではなく effect で同期し、後続 effect が新値を読めるようにする。
+  const persistEnabledRef = useRef(persistEnabled);
+  useEffect(() => {
+    persistEnabledRef.current = persistEnabled;
+  });
 
   const clearTimer = useCallback(() => {
     if (timerRef.current !== null) {
@@ -142,6 +149,8 @@ export function useSessionPromptDraft(
 
   // セッション切替時: 切替元の保留保存を flush してから切替先を復元する。
   // 下書きがなければ入力欄を空にする。復元による state 更新は保存対象にしない。
+  // 永続化無効時は復元せず空にする。flush は旧セッションのキーへの書き込みの
+  // ため無条件で行う（無効セッションに保留保存は存在しない）。
   useEffect(() => {
     if (sessionRef.current && sessionRef.current !== sessionId) {
       flush();
@@ -150,6 +159,14 @@ export function useSessionPromptDraft(
     clearTimer();
     pendingRef.current = null;
     if (!sessionId) {
+      if (draftRef.current !== "") {
+        draftRef.current = "";
+        skipSaveRef.current = true;
+        setDraftState("");
+      }
+      return;
+    }
+    if (!persistEnabledRef.current) {
       if (draftRef.current !== "") {
         draftRef.current = "";
         skipSaveRef.current = true;
@@ -169,7 +186,10 @@ export function useSessionPromptDraft(
   // テキスト変更をデバウンス保存する。スケジュール時点のセッションIDを
   // 保持し、発火時に current と一致しなければ書き込まないことで、
   // 古いタイマーが新セッションのキーへ書き込むのを防ぐ。
+  // 永続化無効時は保存をスケジュールしない。スケジュール後に無効化された
+  // 場合は発火時にも破棄する。
   useEffect(() => {
+    if (!persistEnabledRef.current) return;
     if (skipSaveRef.current) {
       skipSaveRef.current = false;
       return;
@@ -183,6 +203,7 @@ export function useSessionPromptDraft(
       timerRef.current = null;
       pendingRef.current = null;
       if (!pending) return;
+      if (!persistEnabledRef.current) return;
       if (sessionRef.current !== pending.sessionId) return;
       persist(pending.sessionId, pending.value);
     }, debounceMs);
@@ -191,9 +212,13 @@ export function useSessionPromptDraft(
     };
   }, [draft, debounceMs, clearTimer, persist]);
 
-  // unmount 時は保留中の保存を flush する。
+  // unmount 時は保留中の保存を flush する（永続化無効時は破棄する）。
   useEffect(() => {
     return () => {
+      if (!persistEnabledRef.current) {
+        pendingRef.current = null;
+        return;
+      }
       const pending = pendingRef.current;
       if (pending) {
         writePromptDraft(page, pending.sessionId, pending.value);
@@ -223,6 +248,7 @@ export function useSessionPromptDraft(
 
   const saveDraftFor = useCallback(
     (sid: string, value: string) => {
+      if (!persistEnabledRef.current) return;
       if (pendingRef.current?.sessionId === sid) {
         clearTimer();
         pendingRef.current = null;

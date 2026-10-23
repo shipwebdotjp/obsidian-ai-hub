@@ -351,7 +351,7 @@ def main():
     parser.add_argument(
         "--cleanup-execution-logs",
         action="store_true",
-        help="30日経過した実行ログ（command_runs / llm_call_logs）と、前日以前に作成され、メッセージがない「新しい会話」のWeb chatセッションをクリーンアップ",
+        help="30日経過した実行ログ（command_runs / llm_call_logs）と、前日以前に作成され、メッセージがない「新しい会話」のWeb chatセッション、最終更新から24時間経過した一時会話セッションをクリーンアップ",
     )
     parser.add_argument(
         "--import-apple-health",

@@ -26,9 +26,13 @@ import {
 } from "../../components/InConversationQuestionCard";
 import {
   clearLastViewedSessionId,
+  readLastViewedSessionId,
   writeLastViewedSessionId,
 } from "./lastViewedSession";
 import { removeAgentSendQueue } from "./agentSendQueue";
+import { removeAgentImageDraft } from "./useAgentImageDraft";
+import { removeAgentContextRefDraft } from "./useAgentContextRefDraft";
+import { removePromptDraftFor } from "../../hooks/useSessionPromptDraft";
 
 interface UseAgentSessionsOptions {
   selectedAgentId: string | null;
@@ -63,6 +67,12 @@ export function useAgentSessions({
   const [answerHistory, setAnswerHistory] = useState<AskUserAnswerRound[]>([]);
   const [activeWaitingRun, setActiveWaitingRun] = useState<ActiveWaitingRun | null>(null);
   const [loadedSessionId, setLoadedSessionId] = useState<string | null>(null);
+  const [isEphemeralSession, setIsEphemeralSession] = useState(false);
+  // 一時会話セッションは一覧 API に含まれないため、選択維持のために
+  // session_id -> agent_id をここで保持する。
+  const ephemeralSessionAgentsRef = useRef(new Map<string, string>());
+  // loadSessions の非同期解決が古くならないようにするトークン。
+  const loadSessionsTokenRef = useRef(0);
   const [sessionSearchQuery, setSessionSearchQuery] = useState("");
   const [sessionSearchResults, setSessionSearchResults] = useState<AgentMessageSearchResult[]>([]);
   const [isSessionSearchLoading, setIsSessionSearchLoading] = useState(false);
@@ -79,42 +89,74 @@ export function useAgentSessions({
   const pendingSearchTargetRef = useRef<{ sessionId: string; messageId: string } | null>(null);
 
   const loadSessions = async (agentId: string) => {
+    const loadToken = ++loadSessionsTokenRef.current;
     onActionError(null);
     try {
       const res = await listAgentSessions(agentId);
+      if (loadToken !== loadSessionsTokenRef.current) return;
       setSessions(res.sessions);
       const target = pendingSessionIdRef.current;
       const targetSource = pendingSourceRef.current;
       if (target && res.sessions.some((s) => s.session_id === target)) {
         setSelectedSessionId(target);
       } else if (target) {
-        // Target session does not belong to this agent: drop it and fall back.
+        // Target session is not listed: it may be an ephemeral (temporary)
+        // session, which the list API excludes. Accept it when it exists and
+        // belongs to this agent; otherwise fall back as before.
+        let resolvedToTarget = false;
+        const selectionBefore = selectedSessionIdRef.current;
+        try {
+          const detail = await getAgentSessionDetail(target);
+          if (loadToken !== loadSessionsTokenRef.current) return;
+          if (selectedSessionIdRef.current !== selectionBefore) return;
+          if (
+            detail.session.agent_id === agentId &&
+            detail.session.session_id === target
+          ) {
+            setSelectedSessionId(target);
+            resolvedToTarget = true;
+            if (detail.session.is_ephemeral) {
+              ephemeralSessionAgentsRef.current.set(target, agentId);
+              // 一覧に載らない分、詳細ロード完了前から ephemeral 扱いにする。
+              setIsEphemeralSession(true);
+            }
+          }
+        } catch {
+          // Falls through to the invalid-target fallback below.
+          if (loadToken !== loadSessionsTokenRef.current) return;
+        }
         pendingSessionIdRef.current = null;
         pendingSourceRef.current = null;
-        if (targetSource === "storage") {
-          // Stored session is gone from this agent: erase it. There is no URL
-          // param to clean on an ID-less entry.
-          clearLastViewedSessionId();
-          storageRestoreIdRef.current = null;
-        } else {
-          setSearchParams(
-            (prev) => {
-              const next = new URLSearchParams(prev);
-              next.delete("session_id");
-              return next;
-            },
-            { replace: true },
-          );
-        }
-        if (res.sessions.length > 0) {
-          setSelectedSessionId(res.sessions[0].session_id);
-        } else {
-          setSelectedSessionId(null);
-          setMessages([]);
+        if (!resolvedToTarget) {
+          if (targetSource === "storage") {
+            // Stored session is gone from this agent: erase it. There is no URL
+            // param to clean on an ID-less entry.
+            clearLastViewedSessionId();
+            storageRestoreIdRef.current = null;
+          } else {
+            setSearchParams(
+              (prev) => {
+                const next = new URLSearchParams(prev);
+                next.delete("session_id");
+                return next;
+              },
+              { replace: true },
+            );
+          }
+          if (res.sessions.length > 0) {
+            setSelectedSessionId(res.sessions[0].session_id);
+          } else {
+            setSelectedSessionId(null);
+            setMessages([]);
+          }
         }
       } else if (res.sessions.length > 0) {
         setSelectedSessionId((prev) => {
           if (prev && res.sessions.some((s) => s.session_id === prev)) {
+            return prev;
+          }
+          // 一時会話は一覧に含まれないが、同エージェントのものは選択を維持する。
+          if (prev && ephemeralSessionAgentsRef.current.get(prev) === agentId) {
             return prev;
           }
           return res.sessions[0].session_id;
@@ -149,15 +191,18 @@ export function useAgentSessions({
     onActionError(null);
     try {
       const detail = await getAgentSessionDetail(sessionId);
+      // Stale response: never apply state for a superseded load.
+      if (selectedSessionIdRef.current !== sessionId) return;
       // The selection is confirmed: this session is actually displayed, so
-      // record it as the last-viewed session. Skip stale responses that
-      // arrived after the user moved to another session.
-      if (selectedSessionIdRef.current === sessionId) {
+      // record it as the last-viewed session. Ephemeral (temporary) sessions
+      // are never recorded for restoration.
+      if (!detail.session.is_ephemeral) {
         writeLastViewedSessionId(sessionId);
       }
       if (storageRestoreIdRef.current === sessionId) {
         storageRestoreIdRef.current = null;
       }
+      setIsEphemeralSession(!!detail.session.is_ephemeral);
       setMessages(detail.messages);
       const sessionRuns = detail.runs || [];
       setRuns(sessionRuns);
@@ -190,11 +235,20 @@ export function useAgentSessions({
     } catch (e: unknown) {
       // A storage-restored session that no longer loads is unrestorable:
       // erase the stored value and silently fall back to the first session,
-      // mirroring the invalid deep-link fallback. Normal selections keep the
-      // existing error display.
-      if (storageRestoreIdRef.current === sessionId) {
+      // mirroring the invalid deep-link fallback. A retained ephemeral session
+      // removed by the TTL purge behaves the same way. Normal selections keep
+      // the existing error display.
+      const wasEphemeralRetained = ephemeralSessionAgentsRef.current.delete(sessionId);
+      if (storageRestoreIdRef.current === sessionId || wasEphemeralRetained) {
         storageRestoreIdRef.current = null;
-        clearLastViewedSessionId();
+        if (wasEphemeralRetained) {
+          setIsEphemeralSession(false);
+          if (readLastViewedSessionId() === sessionId) {
+            clearLastViewedSessionId();
+          }
+        } else {
+          clearLastViewedSessionId();
+        }
         if (sessions.length > 0) {
           setSelectedSessionId(sessions[0].session_id);
         } else {
@@ -264,15 +318,25 @@ export function useAgentSessions({
   const resetForEmptySession = () => {
     setMessages([]);
     setLoadedSessionId(null);
+    setIsEphemeralSession(false);
   };
 
   // Session Actions
-  const handleCreateSession = async (): Promise<string | null> => {
+  const handleCreateSession = async (ephemeral: boolean = false): Promise<string | null> => {
     if (!selectedAgentId) return null;
     onActionError(null);
     try {
-      const res = await createAgentSession(selectedAgentId);
-      setSessions((prev) => [res.session, ...prev]);
+      const res = await createAgentSession(
+        selectedAgentId,
+        ephemeral ? { ephemeral: true } : undefined,
+      );
+      // 一時会話は一覧 API に含まれないため、表示リストには加えない。
+      if (!res.session.is_ephemeral) {
+        setSessions((prev) => [res.session, ...prev]);
+      } else {
+        ephemeralSessionAgentsRef.current.set(res.session.session_id, selectedAgentId);
+      }
+      setIsEphemeralSession(!!res.session.is_ephemeral);
       setSelectedSessionId(res.session.session_id);
       setSearchParams(
         (prev) => {
@@ -344,6 +408,15 @@ export function useAgentSessions({
     try {
       await deleteAgentSession(deletedId);
       removeAgentSendQueue(deletedId);
+      // 一時会話の残渣を残さない：選択維持マップと全下書きを掃除する。
+      // （通常会話のキー削除は no-op のため分岐しない）
+      ephemeralSessionAgentsRef.current.delete(deletedId);
+      removePromptDraftFor("agents", deletedId);
+      removeAgentImageDraft(deletedId);
+      removeAgentContextRefDraft(deletedId);
+      if (readLastViewedSessionId() === deletedId) {
+        clearLastViewedSessionId();
+      }
       const remaining = sessions.filter((s) => s.session_id !== deletedId);
       setSessions((prev) => prev.filter((s) => s.session_id !== deletedId));
       setSessionToDelete(null);
@@ -485,6 +558,7 @@ export function useAgentSessions({
     setActiveWaitingRun,
     loadedSessionId,
     setLoadedSessionId,
+    isEphemeralSession,
     sessionSearchQuery,
     setSessionSearchQuery,
     sessionSearchResults,

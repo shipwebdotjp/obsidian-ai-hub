@@ -935,6 +935,7 @@ export interface AgentSession {
   agent_id: string;
   title: string;
   pinned_at?: string | null;
+  is_ephemeral?: boolean;
   created_at: string;
   updated_at: string;
 }

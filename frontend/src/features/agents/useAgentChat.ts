@@ -26,7 +26,7 @@ import type {
   ActiveWaitingRun,
   QuestionItem,
 } from "../../components/InConversationQuestionCard";
-import { useAgentImageDraft } from "./useAgentImageDraft";
+import { AGENT_IMAGE_DRAFT_DEBOUNCE_MS, useAgentImageDraft } from "./useAgentImageDraft";
 import { useAgentContextRefDraft } from "./useAgentContextRefDraft";
 import {
   clearQueuedAgentMessageError,
@@ -114,6 +114,8 @@ interface UseAgentChatOptions {
   setPromptInputLocal: (text: string) => void;
   removePromptDraftFor: (sessionId: string) => void;
   imageInputRef: MutableRefObject<HTMLInputElement | null>;
+  /** false のとき画像・参照の下書きを storage へ保存・復元しない（一時会話用）。 */
+  persistDrafts?: boolean;
 }
 
 /** チャット送信・SSE購読・添付画像・ストリーミング表示状態を管理する。 */
@@ -136,6 +138,7 @@ export function useAgentChat({
   setPromptInputLocal,
   removePromptDraftFor,
   imageInputRef,
+  persistDrafts = true,
 }: UseAgentChatOptions) {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState("");
@@ -213,6 +216,8 @@ export function useAgentChat({
     setPendingAttachments,
     inputText,
     () => onChatError("下書きが大きすぎて保存できません（画像を減らしてください）。"),
+    AGENT_IMAGE_DRAFT_DEBOUNCE_MS,
+    persistDrafts,
   );
 
   // 参照コンテキスト（Vault ファイル）の下書きもセッションごとに保存・復元する。
@@ -224,6 +229,7 @@ export function useAgentChat({
     selectedSessionId,
     pendingContextRefs,
     setPendingContextRefs,
+    persistDrafts,
   );
 
   const handleToggleContextRef = useCallback(

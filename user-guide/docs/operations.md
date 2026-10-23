@@ -80,6 +80,7 @@ make logs-hitl-worker / make errorlogs-hitl-worker
 - ワンショットジョブの終端履歴 — 30 日後に削除。
 - LINE webhook / 実行ログ — `--cleanup-line-webhooks` / `--cleanup-execution-logs` で 30 日より古いものを削除。
 - 空の Web chat セッション — `--cleanup-execution-logs` 実行時に、タイトルが「新しい会話」で前日以前に作成され、メッセージがないものを削除。
+- 一時会話セッション — `--cleanup-execution-logs` 実行時に、最終更新から 24 時間経過したものを削除（メッセージの有無を問わない）。
 
 非終端のものは削除されません。
 

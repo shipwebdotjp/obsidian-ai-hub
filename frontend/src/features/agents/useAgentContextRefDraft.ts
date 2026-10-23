@@ -89,6 +89,7 @@ export function useAgentContextRefDraft(
   sessionId: string | null,
   refs: PendingContextRef[],
   setRefs: Dispatch<SetStateAction<PendingContextRef[]>>,
+  persistEnabled: boolean = true,
 ): AgentContextRefDraft {
   const sessionRef = useRef<string | null>(sessionId);
   const timerRef = useRef<number | null>(null);
@@ -96,6 +97,12 @@ export function useAgentContextRefDraft(
   const skipSaveRef = useRef(false);
   const latestRefsRef = useRef(refs);
   const setRefsRef = useRef(setRefs);
+  // 一時会話など storage へ残さない場合は保存・復元を全面抑止する。
+  // レンダー中の直接代入ではなく effect で同期し、後続 effect が新値を読めるようにする。
+  const persistEnabledRef = useRef(persistEnabled);
+  useEffect(() => {
+    persistEnabledRef.current = persistEnabled;
+  });
 
   useEffect(() => {
     setRefsRef.current = setRefs;
@@ -111,6 +118,7 @@ export function useAgentContextRefDraft(
 
   const saveContextRefDraftFor = useCallback(
     (sid: string, next: PendingContextRef[]) => {
+      if (!persistEnabledRef.current) return;
       if (pendingRef.current?.sessionId === sid) {
         clearTimer();
         pendingRef.current = null;
@@ -145,6 +153,8 @@ export function useAgentContextRefDraft(
   );
 
   // セッション切替時: 切替元の保留保存を flush してから切替先を復元する。
+  // 永続化無効時は復元せず空にする。flush は旧セッションのキーへの書き込みの
+  // ため無条件で行う（無効セッションに保留保存は存在しない）。
   useEffect(() => {
     if (sessionRef.current && sessionRef.current !== sessionId) {
       const pending = pendingRef.current;
@@ -162,6 +172,12 @@ export function useAgentContextRefDraft(
       setRefsRef.current([]);
       return;
     }
+    if (!persistEnabledRef.current) {
+      latestRefsRef.current = [];
+      skipSaveRef.current = true;
+      setRefsRef.current([]);
+      return;
+    }
     const restored = readAgentContextRefDraft(sessionId);
     latestRefsRef.current = restored;
     skipSaveRef.current = true;
@@ -170,7 +186,10 @@ export function useAgentContextRefDraft(
   }, [sessionId, clearTimer]);
 
   // 参照変更をデバウンス保存する（500ms、画像下書きと同一）。
+  // 永続化無効時は保存をスケジュールしない。スケジュール後に無効化された
+  // 場合は発火時にも破棄する。
   useEffect(() => {
+    if (!persistEnabledRef.current) return;
     if (skipSaveRef.current) {
       skipSaveRef.current = false;
       return;
@@ -185,6 +204,7 @@ export function useAgentContextRefDraft(
       timerRef.current = null;
       pendingRef.current = null;
       if (!pending) return;
+      if (!persistEnabledRef.current) return;
       if (sessionRef.current !== pending.sessionId) return;
       writeAgentContextRefDraft(pending.sessionId, pending.refs);
     }, 500);
@@ -195,6 +215,10 @@ export function useAgentContextRefDraft(
 
   useEffect(() => {
     return () => {
+      if (!persistEnabledRef.current) {
+        pendingRef.current = null;
+        return;
+      }
       const pending = pendingRef.current;
       if (pending) {
         pendingRef.current = null;

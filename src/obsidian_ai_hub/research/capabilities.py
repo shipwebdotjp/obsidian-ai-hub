@@ -422,7 +422,7 @@ def search_agent_conversations(
         raise ValueError("query must not be empty")
 
     limit = max(1, min(limit, 10))
-    where_clauses = ["m.content LIKE ?"]
+    where_clauses = ["m.content LIKE ?", "COALESCE(s.is_ephemeral, 0) = 0"]
     params: list = [f"%{query}%"]
 
     if start_date:

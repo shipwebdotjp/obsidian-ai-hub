@@ -26,6 +26,8 @@ export default function AgentsPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [chatError, setChatError] = useState<string | null>(null);
   const [shortcutUrlCopied, setShortcutUrlCopied] = useState(false);
+  // 「＋ 新しい会話」を一時会話として作成するトグル。
+  const [ephemeralNew, setEphemeralNew] = useState(false);
   const shortcutUrlResetRef = useRef<number | null>(null);
   const focusChatInput = Boolean(
     (location.state as { focusChatInput?: boolean } | null)?.focusChatInput,
@@ -104,7 +106,12 @@ export default function AgentsPage() {
     setLocalDraft: setPromptInputLocal,
     saveDraftFor: savePromptDraftFor,
     removeDraftFor: removePromptDraftFor,
-  } = useSessionPromptDraft("agents", sessions.selectedSessionId);
+  } = useSessionPromptDraft(
+    "agents",
+    sessions.selectedSessionId,
+    undefined,
+    !sessions.isEphemeralSession,
+  );
 
   // ?prompt=... があれば、確定済みセッションの入力欄へ一度だけ流し込む。
   // 自動送信はしない。既存の入力・保存済み下書きは上書きしない。
@@ -137,6 +144,19 @@ export default function AgentsPage() {
     setSearchParams,
   ]);
 
+  // ?ephemeral= は作成時の指定であり、セッション行が正本のため URL から除去する。
+  useEffect(() => {
+    if (!searchParams.has("ephemeral")) return;
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("ephemeral");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [searchParams, setSearchParams]);
+
   const chat = useAgentChat({
     selectedSessionId: sessions.selectedSessionId,
     selectedAgentId: catalog.selectedAgentId,
@@ -156,6 +176,7 @@ export default function AgentsPage() {
     setPromptInputLocal,
     removePromptDraftFor,
     imageInputRef,
+    persistDrafts: !sessions.isEphemeralSession,
   });
 
   const templates = useAgentTemplates({
@@ -245,8 +266,26 @@ export default function AgentsPage() {
   // ref ではなく state で保持し、設定時に確実に再レンダーを起こす。
   const [focusAfterCreate, setFocusAfterCreate] = useState(false);
   const handleCreateSessionAndFocus = () => {
-    void sessions.handleCreateSession().then((createdId) => {
-      if (createdId) setFocusAfterCreate(true);
+    void sessions.handleCreateSession(ephemeralNew).then((createdId) => {
+      if (createdId) {
+        setFocusAfterCreate(true);
+        // 一時指定は作成時にのみ適用し、次回作成への持ち越しはしない。
+        setEphemeralNew(false);
+      }
+    });
+  };
+
+  // 一時会話の終了ボタン：確認モーダルを経て削除する。本文は表示しない。
+  const handleEndEphemeralSession = () => {
+    const sid = sessions.selectedSessionId;
+    if (!sid || !activeAgent) return;
+    const now = new Date().toISOString();
+    sessions.setSessionToDelete({
+      session_id: sid,
+      agent_id: activeAgent.agent_id,
+      title: "一時会話",
+      created_at: now,
+      updated_at: now,
     });
   };
 
@@ -314,6 +353,8 @@ export default function AgentsPage() {
         selectedSessionId={sessions.selectedSessionId}
         onSelectSession={handleSelectSession}
         onCreateSession={handleCreateSessionAndFocus}
+        ephemeralNew={ephemeralNew}
+        onEphemeralNewChange={setEphemeralNew}
         sessionSearchQuery={sessions.sessionSearchQuery}
         onSessionSearchQueryChange={sessions.setSessionSearchQuery}
         sessionSearchResults={sessions.sessionSearchResults}
@@ -413,6 +454,8 @@ export default function AgentsPage() {
               onOpenEditForm={handleOpenEditForm}
               onCopyShortcutUrl={handleCopyShortcutUrl}
               shortcutUrlCopied={shortcutUrlCopied}
+              isEphemeralSession={sessions.isEphemeralSession}
+              onEndEphemeralSession={handleEndEphemeralSession}
             />
 
             {/* Chat Messages View */}

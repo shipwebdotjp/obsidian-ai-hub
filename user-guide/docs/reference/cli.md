@@ -138,7 +138,7 @@ python -m obsidian_ai_hub <flag> [options]
 | フラグ | 説明 |
 | --- | --- |
 | `--cleanup-line-webhooks` | 30 日より古い LINE webhook を削除する。 |
-| `--cleanup-execution-logs` | 30 日より古い実行ログと、前日以前に作成されメッセージがない「新しい会話」の Web chat セッションを削除する。 |
+| `--cleanup-execution-logs` | 30 日より古い実行ログと、前日以前に作成され、メッセージがない「新しい会話」の Web chat セッション、最終更新から 24 時間経過した一時会話セッションを削除する。 |
 
 ## エージェント・コーディング
 

@@ -796,6 +796,9 @@ def get_db_connection() -> sqlite3.Connection:
     if current_version <= 78:
         run_migration_v79(conn)
 
+    if current_version <= 79:
+        run_migration_v80(conn)
+
     return conn
 
 
@@ -1921,6 +1924,24 @@ def run_migration_v79(conn: sqlite3.Connection) -> None:
     except sqlite3.OperationalError as e:
         _ignore_duplicate_schema_object(e)
     conn.execute("PRAGMA user_version = 79;")
+    conn.commit()
+
+
+def run_migration_v80(conn: sqlite3.Connection) -> None:
+    """Run migration for version 80 (agent_sessions.is_ephemeral).
+
+    Adds ``agent_sessions.is_ephemeral`` (0/1 flag for temporary
+    conversations). Ephemeral sessions are hidden from the session list,
+    excluded from memory extraction, and purged by TTL instead of the
+    empty-session rules. Existing rows backfill to 0.
+    """
+    try:
+        conn.execute(
+            "ALTER TABLE agent_sessions ADD COLUMN is_ephemeral INTEGER NOT NULL DEFAULT 0;"
+        )
+    except sqlite3.OperationalError as e:
+        _ignore_duplicate_schema_object(e)
+    conn.execute("PRAGMA user_version = 80;")
     conn.commit()
 
 

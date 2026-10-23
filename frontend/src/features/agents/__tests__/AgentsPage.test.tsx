@@ -2800,6 +2800,103 @@ describe("AgentsPage", () => {
       });
     });
 
+    it("creates an ephemeral session when the ephemeral toggle is on", async () => {
+      const user = userEvent.setup();
+      const created = { ...sampleSession, session_id: "asess_eph_new", title: "新しい会話", is_ephemeral: true };
+      mockCreateSession.mockResolvedValue({ session: created });
+      mockGetSessionDetail.mockImplementation(async (sessionId: string) => {
+        if (sessionId === created.session_id) {
+          return { session: created, agent: sampleAgent, messages: [], runs: [] };
+        }
+        return {
+          session: sampleSession,
+          agent: sampleAgent,
+          messages: [],
+          runs: [],
+        };
+      });
+
+      render(
+        <MemoryRouter initialEntries={["/agents"]}>
+          <AgentsPage />
+        </MemoryRouter>
+      );
+
+      await screen.findByText("明日の予定");
+      await user.click(screen.getByRole("checkbox", { name: "一時会話として作成" }));
+      await user.click(screen.getByRole("button", { name: "＋ 新しい会話" }));
+
+      await waitFor(() => {
+        expect(mockCreateSession).toHaveBeenCalledWith("agent_123", { ephemeral: true });
+      });
+      await waitFor(() => {
+        expect(document.activeElement?.tagName).toBe("TEXTAREA");
+      });
+      expect(screen.getByText("一時会話")).toBeInTheDocument();
+      // 一時指定は使い切り（次回作成への持ち越しなし）。
+      expect(
+        screen.getByRole("checkbox", { name: "一時会話として作成" }),
+      ).not.toBeChecked();
+      // 終了ボタンで削除確認が開く。
+      await user.click(screen.getByRole("button", { name: "一時会話を終了して削除" }));
+      expect(await screen.findByText("会話履歴の削除確認")).toBeInTheDocument();
+    });
+
+    it("opens an ephemeral session from a deep link even though it is not listed", async () => {
+      const eph = { ...sampleSession, session_id: "asess_eph_dl", title: "新しい会話", is_ephemeral: true };
+      mockGetSessionDetail.mockImplementation(async (sessionId: string) => {
+        if (sessionId === eph.session_id) {
+          return { session: eph, agent: sampleAgent, messages: [], runs: [] };
+        }
+        return {
+          session: sampleSession,
+          agent: sampleAgent,
+          messages: [],
+          runs: [],
+        };
+      });
+
+      render(
+        <MemoryRouter initialEntries={["/agents?session_id=asess_eph_dl"]}>
+          <AgentsPage />
+        </MemoryRouter>
+      );
+
+      await waitFor(() => {
+        expect(mockGetSessionDetail).toHaveBeenCalledWith("asess_eph_dl");
+      });
+      expect(await screen.findByText("一時会話")).toBeInTheDocument();
+      // 最終表示会話として保存されない。
+      expect(readLastViewedSessionId()).toBeNull();
+    });
+
+    it("does not persist drafts for ephemeral sessions", async () => {
+      const user = userEvent.setup();
+      const eph = { ...sampleSession, session_id: "asess_eph_nodraft", title: "新しい会話", is_ephemeral: true };
+      mockGetSessionDetail.mockImplementation(async (sessionId: string) => {
+        if (sessionId === eph.session_id) {
+          return { session: eph, agent: sampleAgent, messages: [], runs: [] };
+        }
+        return {
+          session: sampleSession,
+          agent: sampleAgent,
+          messages: [],
+          runs: [],
+        };
+      });
+
+      render(
+        <MemoryRouter initialEntries={["/agents?session_id=asess_eph_nodraft"]}>
+          <AgentsPage />
+        </MemoryRouter>
+      );
+
+      const input = await screen.findByPlaceholderText(/^メッセージを入力/);
+      await user.type(input, "残さない下書き");
+      await act(() => new Promise((resolve) => window.setTimeout(resolve, 650)));
+      expect(sessionStorage.getItem("oaih:prompt-draft:agents:asess_eph_nodraft")).toBeNull();
+    });
+
     it("fills the chat input from ?prompt= without sending and strips the query", async () => {
       function SearchProbe() {
         const location = useLocation();

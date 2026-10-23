@@ -156,12 +156,19 @@ export function useAgentImageDraft(
   text: string,
   onTooLarge: () => void,
   debounceMs: number = AGENT_IMAGE_DRAFT_DEBOUNCE_MS,
+  persistEnabled: boolean = true,
 ): AgentImageDraft {
   const sessionRef = useRef<string | null>(sessionId);
   const timerRef = useRef<number | null>(null);
   const pendingRef = useRef<{ sessionId: string; text: string; attachments: ImageDraftItem[] } | null>(null);
   const skipSaveRef = useRef(false);
   const latestAttachmentsRef = useRef(attachments);
+  // 一時会話など storage へ残さない場合は保存・復元を全面抑止する。
+  // レンダー中の直接代入ではなく effect で同期し、後続 effect が新値を読めるようにする。
+  const persistEnabledRef = useRef(persistEnabled);
+  useEffect(() => {
+    persistEnabledRef.current = persistEnabled;
+  });
 
   const textRef = useRef(text);
   const onTooLargeRef = useRef(onTooLarge);
@@ -189,6 +196,7 @@ export function useAgentImageDraft(
 
   const saveImageDraftFor = useCallback(
     (sid: string, draftText: string, atts: ImageDraftItem[]): ImageDraftWriteResult => {
+      if (!persistEnabledRef.current) return "ok";
       if (pendingRef.current?.sessionId === sid) {
         clearTimer();
         pendingRef.current = null;
@@ -228,6 +236,8 @@ export function useAgentImageDraft(
 
   // セッション切替時: 切替元の保留保存を flush してから切替先の画像を復元する。
   // 下書きがなければ空にする（Aの画像がBに表示されない）。
+  // 永続化無効時は復元せず空にする。flush は旧セッションのキーへの書き込みの
+  // ため無条件で行う（無効セッションに保留保存は存在しない）。
   useEffect(() => {
     if (sessionRef.current && sessionRef.current !== sessionId) {
       const pending = pendingRef.current;
@@ -245,6 +255,12 @@ export function useAgentImageDraft(
       setAttachmentsRef.current([]);
       return;
     }
+    if (!persistEnabledRef.current) {
+      latestAttachmentsRef.current = [];
+      skipSaveRef.current = true;
+      setAttachmentsRef.current([]);
+      return;
+    }
     const restored = readAgentImageDraft(sessionId);
     latestAttachmentsRef.current = restored;
     skipSaveRef.current = true;
@@ -254,7 +270,9 @@ export function useAgentImageDraft(
 
   // 添付変更をデバウンス保存する。発火時にセッション一致を検証し、
   // 古いタイマーが新セッションのキーへ書き込むのを防ぐ。
+  // 永続化無効時は保存をスケジュールしない。
   useEffect(() => {
+    if (!persistEnabledRef.current) return;
     if (skipSaveRef.current) {
       skipSaveRef.current = false;
       return;
@@ -269,6 +287,7 @@ export function useAgentImageDraft(
       timerRef.current = null;
       pendingRef.current = null;
       if (!pending) return;
+      if (!persistEnabledRef.current) return;
       if (sessionRef.current !== pending.sessionId) return;
       persistPending(pending);
     }, debounceMs);
@@ -277,9 +296,13 @@ export function useAgentImageDraft(
     };
   }, [attachments, debounceMs, clearTimer, persistPending]);
 
-  // unmount 時は保留中の保存を flush する。
+  // unmount 時は保留中の保存を flush する（永続化無効時は破棄する）。
   useEffect(() => {
     return () => {
+      if (!persistEnabledRef.current) {
+        pendingRef.current = null;
+        return;
+      }
       const pending = pendingRef.current;
       if (pending) {
         pendingRef.current = null;

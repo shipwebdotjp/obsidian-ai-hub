@@ -66,6 +66,8 @@ interface AgentSidebarProps {
   selectedSessionId: string | null;
   onSelectSession: (sessionId: string) => void;
   onCreateSession: () => void;
+  ephemeralNew: boolean;
+  onEphemeralNewChange: (value: boolean) => void;
   sessionSearchQuery: string;
   onSessionSearchQueryChange: (query: string) => void;
   sessionSearchResults: AgentMessageSearchResult[];
@@ -100,6 +102,8 @@ export function AgentSidebar({
   selectedSessionId,
   onSelectSession,
   onCreateSession,
+  ephemeralNew,
+  onEphemeralNewChange,
   sessionSearchQuery,
   onSessionSearchQueryChange,
   sessionSearchResults,
@@ -192,6 +196,20 @@ export function AgentSidebar({
               </button>
             )}
           </div>
+          {selectedAgentId && (
+            <label className="flex cursor-pointer items-center gap-1.5 border-b border-slate-200 px-3 py-1.5 text-[11px] text-slate-600 hover:bg-slate-50">
+              <input
+                type="checkbox"
+                checked={ephemeralNew}
+                onChange={(e) => onEphemeralNewChange(e.target.checked)}
+                className="h-3.5 w-3.5 accent-violet-700 cursor-pointer"
+                aria-label="一時会話として作成"
+              />
+              <span title="履歴・実行記録を残さない一時的な会話として作成します">
+                一時会話として作成
+              </span>
+            </label>
+          )}
           <div className="border-b border-slate-200 p-2">
             <input
               type="search"

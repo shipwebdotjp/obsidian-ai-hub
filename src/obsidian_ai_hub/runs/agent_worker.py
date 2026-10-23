@@ -76,213 +76,225 @@ async def execute_agent_run(run_id: str) -> None:
             logger.exception("Failed to append error event for run %s", run_id)
         return
 
-    history = await asyncio.to_thread(agent_store.list_messages, session["session_id"])
-    user_msg = await asyncio.to_thread(agent_store.get_message, run["user_message_id"])
-    user_content = str((user_msg or {}).get("content") or "")
-    attachments = (user_msg or {}).get("attachments")
-    user_refs = (user_msg or {}).get("context_refs")
-    context_refs = (
-        [r for r in user_refs if isinstance(r, dict)]
-        if isinstance(user_refs, list)
-        else None
-    )
+    from obsidian_ai_hub.utils import execution_logger
 
-    aggregator = TextAggregator()
-    stream = agent_runtime.generate_agent_stream(
-        agent=agent,
-        session=session,
-        run=run,
-        history_messages=history,
-        user_content=user_content,
-        attachments=attachments,
-        context_refs=context_refs,
-    )
-
-    async def _is_cancelling() -> bool:
-        current = await asyncio.to_thread(agent_store.get_run, run_id)
-        return current is not None and str(current.get("status")) == "cancelling"
-
+    # Ephemeral sessions must not leave LLM call logs (rows have no FK
+    # cascade to agent runs), so suppress for the whole run and reset
+    # afterwards: the worker loop reuses this task for later runs.
+    suppress_token = None
+    if session.get("is_ephemeral"):
+        suppress_token = execution_logger.suppress_execution_logging()
     try:
-        async for chunk in stream:
-            if await _is_cancelling():
-                # Stop consuming; mark cancelled after current tool call returns.
-                # aclose the generator to avoid further LLM/tool work.
-                try:
-                    await stream.aclose()
-                except Exception:
-                    pass
-                flushed = aggregator.flush()
-                if flushed:
+        history = await asyncio.to_thread(agent_store.list_messages, session["session_id"])
+        user_msg = await asyncio.to_thread(agent_store.get_message, run["user_message_id"])
+        user_content = str((user_msg or {}).get("content") or "")
+        attachments = (user_msg or {}).get("attachments")
+        user_refs = (user_msg or {}).get("context_refs")
+        context_refs = (
+            [r for r in user_refs if isinstance(r, dict)]
+            if isinstance(user_refs, list)
+            else None
+        )
+
+        aggregator = TextAggregator()
+        stream = agent_runtime.generate_agent_stream(
+            agent=agent,
+            session=session,
+            run=run,
+            history_messages=history,
+            user_content=user_content,
+            attachments=attachments,
+            context_refs=context_refs,
+        )
+
+        async def _is_cancelling() -> bool:
+            current = await asyncio.to_thread(agent_store.get_run, run_id)
+            return current is not None and str(current.get("status")) == "cancelling"
+
+        try:
+            async for chunk in stream:
+                if await _is_cancelling():
+                    # Stop consuming; mark cancelled after current tool call returns.
+                    # aclose the generator to avoid further LLM/tool work.
+                    try:
+                        await stream.aclose()
+                    except Exception:
+                        pass
+                    flushed = aggregator.flush()
+                    if flushed:
+                        try:
+                            await asyncio.to_thread(
+                                agent_store.append_run_event, run_id, "text_append",
+                                {"delta": flushed},
+                            )
+                        except Exception:
+                            logger.exception("Failed to append flushed text for %s", run_id)
                     try:
                         await asyncio.to_thread(
-                            agent_store.append_run_event, run_id, "text_append",
-                            {"delta": flushed},
+                            agent_store.transition_run_status, run_id, "cancelled",
+                            error_message="User cancelled execution", finished=True,
+                        )
+                    except ValueError:
+                        # Already terminal via runtime path; keep terminal state.
+                        pass
+                    try:
+                        await asyncio.to_thread(
+                            agent_store.append_run_event, run_id, "cancelled",
+                            {"run_id": run_id},
                         )
                     except Exception:
-                        logger.exception("Failed to append flushed text for %s", run_id)
+                        logger.exception("Failed to append cancelled event for %s", run_id)
+                    return
+
+                payload = _parse_sse_payload(chunk)
+                if payload is None:
+                    continue
+                ptype = str(payload.get("type") or "")
+
+                if ptype == "text":
+                    delta = str(payload.get("delta") or "")
+                    aggregated = aggregator.add(delta)
+                    if aggregated:
+                        try:
+                            await asyncio.to_thread(
+                                agent_store.append_run_event, run_id, "text_append",
+                                {"delta": aggregated},
+                            )
+                        except Exception:
+                            logger.exception("Failed to append text_append for %s", run_id)
+                elif ptype in (
+                    "thinking",
+                    "tool_call_detected",
+                    "tool_call_start",
+                    "tool_call_end",
+                ):
+                    try:
+                        await asyncio.to_thread(
+                            agent_store.append_run_event, run_id, ptype, payload
+                        )
+                    except Exception:
+                        logger.exception("Failed to append %s for %s", ptype, run_id)
+                elif ptype == "user_question":
+                    flushed = aggregator.flush()
+                    if flushed:
+                        try:
+                            await asyncio.to_thread(
+                                agent_store.append_run_event, run_id, "text_append",
+                                {"delta": flushed},
+                            )
+                        except Exception:
+                            logger.exception("Failed to flush text before user_question %s", run_id)
+                    # Runtime already transitioned to waiting_user.
+                    try:
+                        await asyncio.to_thread(
+                            agent_store.append_run_event, run_id, "user_question", payload
+                        )
+                    except Exception:
+                        logger.exception("Failed to append user_question for %s", run_id)
+                    return
+                elif ptype == "done":
+                    flushed = aggregator.flush()
+                    if flushed:
+                        try:
+                            await asyncio.to_thread(
+                                agent_store.append_run_event, run_id, "text_append",
+                                {"delta": flushed},
+                            )
+                        except Exception:
+                            logger.exception("Failed to flush text before done %s", run_id)
+                    # Runtime already completed run; persist terminal event.
+                    # Keep payload but ensure run_id present for folding.
+                    done_payload = dict(payload)
+                    done_payload.setdefault("run_id", run_id)
+                    try:
+                        await asyncio.to_thread(
+                            agent_store.append_run_event, run_id, "done", done_payload
+                        )
+                    except Exception:
+                        logger.exception("Failed to append done for %s", run_id)
+                    return
+                elif ptype == "error":
+                    flushed = aggregator.flush()
+                    if flushed:
+                        try:
+                            await asyncio.to_thread(
+                                agent_store.append_run_event, run_id, "text_append",
+                                {"delta": flushed},
+                            )
+                        except Exception:
+                            logger.exception("Failed to flush text before error %s", run_id)
+                    try:
+                        await asyncio.to_thread(
+                            agent_store.append_run_event, run_id, "error", payload
+                        )
+                    except Exception:
+                        logger.exception("Failed to append error for %s", run_id)
+                    return
+                else:
+                    logger.debug("Ignoring unknown agent stream type %s for %s", ptype, run_id)
+
+            # Generator ended without terminal event (e.g. cancelled close or bug).
+            flushed = aggregator.flush()
+            if flushed:
                 try:
                     await asyncio.to_thread(
-                        agent_store.transition_run_status, run_id, "cancelled",
-                        error_message="User cancelled execution", finished=True,
+                        agent_store.append_run_event, run_id, "text_append",
+                        {"delta": flushed},
+                    )
+                except Exception:
+                    logger.exception("Failed to flush trailing text for %s", run_id)
+            current = await asyncio.to_thread(agent_store.get_run, run_id)
+            if current is not None and str(current.get("status")) in ("running", "cancelling", "queued"):
+                # No terminal event observed; mark failed to avoid orphaned running.
+                try:
+                    await asyncio.to_thread(
+                        agent_store.transition_run_status, run_id, "failed",
+                        error_message="Agent worker ended without terminal event", finished=True,
                     )
                 except ValueError:
-                    # Already terminal via runtime path; keep terminal state.
                     pass
                 try:
                     await asyncio.to_thread(
-                        agent_store.append_run_event, run_id, "cancelled",
-                        {"run_id": run_id},
+                        agent_store.append_run_event, run_id, "error",
+                        {"error": "Agent worker ended without terminal event", "run_id": run_id},
                     )
                 except Exception:
-                    logger.exception("Failed to append cancelled event for %s", run_id)
-                return
-
-            payload = _parse_sse_payload(chunk)
-            if payload is None:
-                continue
-            ptype = str(payload.get("type") or "")
-
-            if ptype == "text":
-                delta = str(payload.get("delta") or "")
-                aggregated = aggregator.add(delta)
-                if aggregated:
-                    try:
-                        await asyncio.to_thread(
-                            agent_store.append_run_event, run_id, "text_append",
-                            {"delta": aggregated},
-                        )
-                    except Exception:
-                        logger.exception("Failed to append text_append for %s", run_id)
-            elif ptype in (
-                "thinking",
-                "tool_call_detected",
-                "tool_call_start",
-                "tool_call_end",
-            ):
-                try:
-                    await asyncio.to_thread(
-                        agent_store.append_run_event, run_id, ptype, payload
-                    )
-                except Exception:
-                    logger.exception("Failed to append %s for %s", ptype, run_id)
-            elif ptype == "user_question":
-                flushed = aggregator.flush()
-                if flushed:
-                    try:
-                        await asyncio.to_thread(
-                            agent_store.append_run_event, run_id, "text_append",
-                            {"delta": flushed},
-                        )
-                    except Exception:
-                        logger.exception("Failed to flush text before user_question %s", run_id)
-                # Runtime already transitioned to waiting_user.
-                try:
-                    await asyncio.to_thread(
-                        agent_store.append_run_event, run_id, "user_question", payload
-                    )
-                except Exception:
-                    logger.exception("Failed to append user_question for %s", run_id)
-                return
-            elif ptype == "done":
-                flushed = aggregator.flush()
-                if flushed:
-                    try:
-                        await asyncio.to_thread(
-                            agent_store.append_run_event, run_id, "text_append",
-                            {"delta": flushed},
-                        )
-                    except Exception:
-                        logger.exception("Failed to flush text before done %s", run_id)
-                # Runtime already completed run; persist terminal event.
-                # Keep payload but ensure run_id present for folding.
-                done_payload = dict(payload)
-                done_payload.setdefault("run_id", run_id)
-                try:
-                    await asyncio.to_thread(
-                        agent_store.append_run_event, run_id, "done", done_payload
-                    )
-                except Exception:
-                    logger.exception("Failed to append done for %s", run_id)
-                return
-            elif ptype == "error":
-                flushed = aggregator.flush()
-                if flushed:
-                    try:
-                        await asyncio.to_thread(
-                            agent_store.append_run_event, run_id, "text_append",
-                            {"delta": flushed},
-                        )
-                    except Exception:
-                        logger.exception("Failed to flush text before error %s", run_id)
-                try:
-                    await asyncio.to_thread(
-                        agent_store.append_run_event, run_id, "error", payload
-                    )
-                except Exception:
-                    logger.exception("Failed to append error for %s", run_id)
-                return
-            else:
-                logger.debug("Ignoring unknown agent stream type %s for %s", ptype, run_id)
-
-        # Generator ended without terminal event (e.g. cancelled close or bug).
-        flushed = aggregator.flush()
-        if flushed:
+                    logger.exception("Failed to append trailing error for %s", run_id)
+        except asyncio.CancelledError:
+            # Worker shutdown: leave run for shutdown recovery (interrupted).
+            raise
+        except Exception as exc:
+            logger.exception("Agent worker failed for run %s", run_id)
             try:
-                await asyncio.to_thread(
-                    agent_store.append_run_event, run_id, "text_append",
-                    {"delta": flushed},
-                )
+                flushed = aggregator.flush()
+                if flushed:
+                    await asyncio.to_thread(
+                        agent_store.append_run_event, run_id, "text_append",
+                        {"delta": flushed},
+                    )
             except Exception:
-                logger.exception("Failed to flush trailing text for %s", run_id)
-        current = await asyncio.to_thread(agent_store.get_run, run_id)
-        if current is not None and str(current.get("status")) in ("running", "cancelling", "queued"):
-            # No terminal event observed; mark failed to avoid orphaned running.
-            try:
-                await asyncio.to_thread(
-                    agent_store.transition_run_status, run_id, "failed",
-                    error_message="Agent worker ended without terminal event", finished=True,
-                )
-            except ValueError:
                 pass
+            try:
+                current = await asyncio.to_thread(agent_store.get_run, run_id)
+                if current is not None and str(current.get("status")) in (
+                    "queued", "running", "cancelling",
+                ):
+                    await asyncio.to_thread(
+                        agent_store.transition_run_status, run_id, "failed",
+                        error_message=str(exc), finished=True,
+                    )
+            except Exception:
+                logger.exception("Failed to mark agent run %s failed", run_id)
             try:
                 await asyncio.to_thread(
                     agent_store.append_run_event, run_id, "error",
-                    {"error": "Agent worker ended without terminal event", "run_id": run_id},
+                    {"error": str(exc), "run_id": run_id},
                 )
             except Exception:
-                logger.exception("Failed to append trailing error for %s", run_id)
-    except asyncio.CancelledError:
-        # Worker shutdown: leave run for shutdown recovery (interrupted).
-        raise
-    except Exception as exc:
-        logger.exception("Agent worker failed for run %s", run_id)
-        try:
-            flushed = aggregator.flush()
-            if flushed:
-                await asyncio.to_thread(
-                    agent_store.append_run_event, run_id, "text_append",
-                    {"delta": flushed},
-                )
-        except Exception:
-            pass
-        try:
-            current = await asyncio.to_thread(agent_store.get_run, run_id)
-            if current is not None and str(current.get("status")) in (
-                "queued", "running", "cancelling",
-            ):
-                await asyncio.to_thread(
-                    agent_store.transition_run_status, run_id, "failed",
-                    error_message=str(exc), finished=True,
-                )
-        except Exception:
-            logger.exception("Failed to mark agent run %s failed", run_id)
-        try:
-            await asyncio.to_thread(
-                agent_store.append_run_event, run_id, "error",
-                {"error": str(exc), "run_id": run_id},
-            )
-        except Exception:
-            logger.exception("Failed to append error event for %s", run_id)
+                logger.exception("Failed to append error event for %s", run_id)
+    finally:
+        if suppress_token is not None:
+            execution_logger.reset_execution_logging(suppress_token)
 
 
 async def agent_worker_loop(
