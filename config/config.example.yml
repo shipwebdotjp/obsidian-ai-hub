@@ -241,3 +241,8 @@ image_generation:
   lock_llm_quality: true
   llm_quality: low
   timeout_seconds: 180
+
+# Weekly review draft limits for Coach Goals and Focuses
+review_draft:
+  max_goals: 5
+  max_focuses_per_goal: 3

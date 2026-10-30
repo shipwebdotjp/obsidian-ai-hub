@@ -41,6 +41,8 @@ uv run -m obsidian_ai_hub --summerize-month --month 2026-07
 下書きは `result::` の直下に保存されてから通知が送られます。
 週次ノートは、その週の月曜日が属する月のフォルダに保存・参照されます（年と週番号は ISO 年・ISO 週番号のままです）。
 
+Coach の Goal（`status='active'`）および Focus（`status` が `active` または `paused`）が存在する場合、振り返りの視点（レンズ）として自動的に読み込まれます。Coach 情報が存在するときは `## Focus との関係` が `## 来週の一歩` の直前に含まれる 6 見出し形式で生成されます。Coach 情報がない（または取得失敗時）場合は従来の 5 見出し形式で作成されます。Goal / Focus は達成度の採点や評価用ではなく、出来事を思い出すための視点として扱われます。
+
 ```bash
 uv run -m obsidian_ai_hub --review-draft
 uv run -m obsidian_ai_hub --review-draft --review-week-date 2026-07-12

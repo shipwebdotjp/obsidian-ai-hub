@@ -761,6 +761,7 @@ REVIEW_DRAFT_PROMPT_PATH = _optional_path(
 if REVIEW_DRAFT_PROMPT_PATH is None:
     REVIEW_DRAFT_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "review_draft.md"
 
+
 SUMMARIZE_DAY_PROMPT_PATH = _optional_path(
     "SUMMARIZE_DAY_PROMPT_PATH", "llm", "summarize_day", "prompt_path"
 )
@@ -1591,6 +1592,13 @@ IMAGE_GENERATION_MAX_COUNT = _positive_int(
         "IMAGE_GENERATION_MAX_COUNT", "image_generation", "max_count", default=4
     ),
     4,
+)
+
+REVIEW_DRAFT_MAX_GOALS = _positive_int(
+    _config_value("review_draft", "max_goals", default=5), 5
+)
+REVIEW_DRAFT_MAX_FOCUSES_PER_GOAL = _positive_int(
+    _config_value("review_draft", "max_focuses_per_goal", default=3), 3
 )
 IMAGE_GENERATION_TIMEOUT_SECONDS = _positive_int(
     _config_value("image_generation", "timeout_seconds", default=180),
