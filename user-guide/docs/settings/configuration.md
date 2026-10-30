@@ -78,6 +78,7 @@ Vault のパスは `.env` には置きません。`config/config.yml` の `vault
 | `research` | リサーチの既定出力スタイル・文脈・ディープリサーチ設定 |
 | `vault_index` | Vault 検索インデックスの collection / 保存先 / 埋め込みモデル。保存先は Vault ごとの基準ディレクトリとして使い、実体は `<基準>/<vault_id>/` 配下に分離される |
 | `retrieval` | 汎用 Retrieval 検索（長期記憶）の Chroma 保存先 / collection（埋め込みモデルは `vault_index.embedder_model` を流用） |
+| `review_draft` | 週次レビュー下書きでの Coach Goal / Focus 上限数（`max_goals`: 既定 5、`max_focuses_per_goal`: 既定 3、最新順） |
 | `coding` | コーディングのオーケストレーターと OpenCode ACP 設定（[コーディング設定](coding.md)） |
 | `image_generation` | 画像生成の保存先・モデル・既定サイズ/品質（[画像生成](../features/image-generation.md)） |
 | `youtube` | 文字起こし言語・Whisper モデル・要約チャンク文字数 |

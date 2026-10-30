@@ -633,3 +633,39 @@ v74 の初期値 `skipped` は、API 呼出し中の例外や停止後にも「�
 | 通知作成 | 正規化済み `NotificationEvent` | 両チャネルを `pending` として受信箱へ commit | 保存失敗なら送信しない | なし |
 | チャネル判定 | 設定と購読一覧 | `skipped` と理由コード・時刻 | 設定読取失敗は未確定チャネルを `unknown` | なし |
 | API送信 | `in_progress` を commit 済みの単一チャネル | API 結果を `accepted` / `partial_accepted` / `failed` と時刻・安全な理由で commit | 例外では残る未確定チャネルを `unknown`。再送しない | LINE / Push API に一度だけ送信 |
+
+## 週次レビュー下書きへの Coach Goal / Focus 視点注入（Phase 2）
+
+| 項目 | 内容 |
+|------|------|
+| 決定日 | 2026-10-30 |
+| カテゴリ | 週次リフレクション・Coach・LLM連携 |
+| 決定内容 | 週次レビュー下書き生成時に、現在の Coach の Goal / Focus を参照データとしてプロンプトへ注入する。Goal / Focus は達成度の採点基準ではなく出来事を思い出すための視点とし、情報が存在する場合のみ条件付き見出し `## Focus との関係` を `## 来週の一歩` の直前に挿入した6見出し形式とする。Coach 情報が空または取得失敗時は従来の5見出し形式で生成・保存・送信する。 |
+
+### 結論に至った経緯
+
+[docs/week-reflection/README.md](../docs/week-reflection/README.md) Phase 2 に基づき、日曜夕方の週次レビュー下書きに Coach の Goal / Focus を振り返りの視点として組み込む。
+
+1. **抽出・フィルタリング規則:**
+   - 状態が `status = 'active'` の Goal のみを含める。
+   - 各 Goal の Focus は `status` が `active` または `paused` のもののみを含め、`candidate` やその他の状態は除外する。各 Focus の状態（active / paused）をプロンプト上で明示する。
+   - Goal は `created_at` 降順（最新順、上限 `review_draft.max_goals`、既定 5 件）、Focus も `created_at` 降順（最新順、上限 `review_draft.max_focuses_per_goal`、既定 3 件）で取得・制限する。
+   - DB エラーや形式不整合等で Coach 情報の取得に失敗した場合、または対象の Goal / Focus が存在しない場合は、ログに警告を出力して空文字列へ縮退し、下書き生成処理全体を止めない（`_compile_long_term_memories` と同等のデグレード継続ポリシー）。
+
+2. **出力ルールと条件付き見出し:**
+   - Coach 情報が存在する場合（非空）：次の 6 見出しをこの順番通りに必ず使用する。
+     1. `## 今週の達成`
+     2. `## 目標の振り返り`
+     3. `## 気づき・学び`
+     4. `## 改善したいこと`
+     5. `## Focus との関係`
+     6. `## 来週の一歩`
+   - Coach 情報が空または取得失敗の場合：`## Focus との関係` を出力せず、従来の 5 見出し（`## 今週の達成`〜`## 来週の一歩`）の順で出力する。
+   - フォーマット検証（`_has_expected_format`）は Coach 情報の有無に応じた見出しセット（5 件または 6 件）の完全な順序性を検証する。Coach 情報があるのに `## Focus との関係` が欠落している場合、または見出し順序が崩れている場合はフォーマット違反として棄却する。
+
+3. **保存済み下書きの再送信ポリシー:**
+   - 保存済み下書きの再送信（`_get_saved_draft` → `_send_review_draft`）は、現在の Coach 状態に対する再検証を行わず、保存された 5 見出し・6 見出しのテキストをそのまま送信する。
+
+4. **設定:**
+   - `review_draft.max_goals`（既定: 5）および `review_draft.max_focuses_per_goal`（既定: 3）を `config.py` に追加。正の整数として評価し、無効値・欠損時は既定値へフォールバックする。
+   - ON/OFF トグル設定は設けず、Coach 情報の有無に応じて常時自動的に判定・適用する。

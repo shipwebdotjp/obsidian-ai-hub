@@ -37,6 +37,7 @@ llm:
 ```
 
 `review_draft` を省略した場合は `make_today_target` のプロバイダ・モデルが使われます。
+週次レビュー下書きでの Coach Goal / Focus の参照上限数は、`review_draft.max_goals`（既定 5、最新順）および `review_draft.max_focuses_per_goal`（既定 3、最新順）で調整できます。
 
 ## システムメンテナンス診断用の設定
 
