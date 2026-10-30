@@ -762,6 +762,20 @@ if REVIEW_DRAFT_PROMPT_PATH is None:
     REVIEW_DRAFT_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "review_draft.md"
 
 
+# Weekly check-in questions use the review-draft LLM unless explicitly overridden.
+COACH_CHECKIN_PROVIDER = str(
+    _config_value("llm", "coach_checkin", "provider", default=REVIEW_DRAFT_PROVIDER)
+)
+COACH_CHECKIN_MODEL = str(
+    _config_value("llm", "coach_checkin", "model", default=REVIEW_DRAFT_MODEL)
+)
+COACH_CHECKIN_PROMPT_PATH = _optional_path(
+    "COACH_CHECKIN_PROMPT_PATH", "llm", "coach_checkin", "prompt_path"
+)
+if COACH_CHECKIN_PROMPT_PATH is None:
+    COACH_CHECKIN_PROMPT_PATH = BASE_DIR / "config" / "prompts" / "coach_weekly_checkin.md"
+
+
 SUMMARIZE_DAY_PROMPT_PATH = _optional_path(
     "SUMMARIZE_DAY_PROMPT_PATH", "llm", "summarize_day", "prompt_path"
 )

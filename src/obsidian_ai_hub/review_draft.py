@@ -1,4 +1,10 @@
-"""Create and notify a weekly review draft stored in a weekly note."""
+"""Create a weekly review draft stored in a weekly note.
+
+The draft is generated and saved into the weekly note only. Delivery to the
+user happens through the weekly check-in HITL run (see
+``obsidian_ai_hub.coach.weekly_checkin``), not through a LINE push of the
+draft text.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +14,6 @@ from datetime import date as date_type
 from datetime import datetime, timedelta
 
 from obsidian_ai_hub.utils import config, llm_client, prompt, reader
-from obsidian_ai_hub.utils.line_messaging import send_line_push
 
 logger = logging.getLogger(__name__)
 
@@ -171,25 +176,12 @@ def _has_expected_format(draft: str, expect_coach: bool = False) -> bool:
     return extracted_headings == expected_headings
 
 
-def _send_review_draft(draft: str) -> bool:
-    if not config.LINE_MESSAGING_TOKEN or not config.LINE_TARGET_ID:
-        logger.error(
-            "LINE token or target is not configured; review draft was saved but not sent"
-        )
-        return False
-    if send_line_push(config.LINE_MESSAGING_TOKEN, config.LINE_TARGET_ID, draft):
-        logger.info("Sent weekly review draft to LINE")
-        return True
-    logger.error("Failed to send weekly review draft to LINE")
-    return False
-
-
 def review_draft(target_date: datetime | date_type | str | None = None) -> bool:
-    """Save a draft when needed, then send the saved draft as a LINE Push message.
+    """Save the weekly review draft into the weekly note.
 
-    Returns ``True`` only when a draft was successfully sent. Expected no-op and
-    failure conditions are logged and return ``False`` so scheduled execution
-    does not fail noisily.
+    Returns ``True`` when a draft is present (newly saved or already saved).
+    Expected no-op and failure conditions are logged and return ``False`` so
+    scheduled execution does not fail noisily.
     """
     try:
         target_date = _coerce_target_date(target_date)
@@ -205,8 +197,8 @@ def review_draft(target_date: datetime | date_type | str | None = None) -> bool:
 
     saved_draft = _get_saved_draft(weekly_note, result_match.end())
     if saved_draft is not None:
-        logger.info("Using saved weekly review draft for LINE retry")
-        return _send_review_draft(saved_draft)
+        logger.info("Weekly review draft already saved; nothing to do")
+        return True
 
     daily_notes = _collect_existing_daily_notes(get_week_dates(target_date))
     if not daily_notes:
@@ -269,7 +261,7 @@ def review_draft(target_date: datetime | date_type | str | None = None) -> bool:
         return False
 
     logger.info("Weekly review draft saved to %s", weekly_note_path)
-    return _send_review_draft(draft)
+    return True
 
 
 def main(target_date: datetime | date_type | str | None = None) -> bool:

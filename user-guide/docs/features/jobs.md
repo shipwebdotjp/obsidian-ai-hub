@@ -159,7 +159,7 @@ Web UI は `/tasks` から `/jobs`、API は `/api/v1/task-config` から `/api/
 ## 参考ジョブ
 
 - **Inbox をほぼリアルタイムに処理** — `merge_inbox` を `type: minutely`、`second: 0` で登録します。
-- **日曜夜の週次レビュー下書き** — `review_draft_sunday_evening` の例をプロジェクトパスに合わせて有効化します。週次ノートに空の `result::` 行が必要です。
+- **日曜夜の週次レビュー下書きとチェックイン** — `review_draft_sunday_evening` の例をプロジェクトパスに合わせて有効化します。週次ノートに空の `result::` 行が必要です。下書きは週次ノートに保存され、LINE へは週次チェックイン（HITL）へのリンクだけが通知されます。
 
 ## 実行状態を確認する
 

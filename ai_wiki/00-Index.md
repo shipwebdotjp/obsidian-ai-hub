@@ -67,3 +67,5 @@
   - [Coding対象解決と既存実行境界](../docs/task-agent/adr/workspace-resolution-and-coding-cli-trust-boundary.md)（主対象Projectのconfidence付き解決、単一対象の実行境界を含む）
   - [自動ロールバックを行わず、要約Eventと人間判断で復旧する](../docs/task-agent/adr/no-automatic-rollback-recovery-via-trace-and-hitl.md)
   - [完了を効果契約から導出する](../docs/task-agent/adr/effect-contract-completion.md)
+  - [GoalをProjectから分離し、コーチ履歴を時系列で保持する](../docs/task-agent/adr/coach-goal-and-history.md)
+  - [週次チェックインをHITLの問いとして配信し、先週の一歩を参照する](../docs/task-agent/adr/weekly-checkin-hitl-question.md)

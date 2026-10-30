@@ -168,7 +168,7 @@ def test_has_expected_format_validation():
     assert review_draft._has_expected_format(out_of_order, expect_coach=False) is False
 
 
-def test_creates_saves_and_sends_review_draft_with_coach_context(monkeypatch, tmp_path):
+def test_creates_and_saves_review_draft_with_coach_context(monkeypatch, tmp_path):
     monday = tmp_path / "2026-07-06.md"
     wednesday = tmp_path / "2026-07-08.md"
     monday.write_text("Monday note", encoding="utf-8")
@@ -194,7 +194,6 @@ def test_creates_saves_and_sends_review_draft_with_coach_context(monkeypatch, tm
         patch.object(
             review_draft.llm_client, "generate_llm_response", return_value=DRAFT_6
         ) as generate,
-        patch.object(review_draft, "send_line_push", return_value=True) as send,
     ):
         assert review_draft.main("2026-07-12") is True
 
@@ -206,7 +205,6 @@ def test_creates_saves_and_sends_review_draft_with_coach_context(monkeypatch, tm
         provider="test-provider", model="test-model", prompt="rendered", max_tokens=16384
     )
     assert DRAFT_6 in weekly_path.read_text(encoding="utf-8")
-    send.assert_called_once_with("token", "target", DRAFT_6)
 
 
 def test_old_custom_prompt_without_coach_context_accepts_5_heading_draft(monkeypatch, tmp_path):
@@ -231,15 +229,13 @@ def test_old_custom_prompt_without_coach_context_accepts_5_heading_draft(monkeyp
         patch.object(
             review_draft.llm_client, "generate_llm_response", return_value=DRAFT_5
         ),
-        patch.object(review_draft, "send_line_push", return_value=True) as send,
     ):
         assert review_draft.main("2026-07-12") is True
 
     assert DRAFT_5 in weekly_path.read_text(encoding="utf-8")
-    send.assert_called_once_with("token", "target", DRAFT_5)
 
 
-def test_creates_saves_and_sends_review_draft_when_coach_context_is_empty(monkeypatch, tmp_path):
+def test_creates_and_saves_review_draft_when_coach_context_is_empty(monkeypatch, tmp_path):
     monday = tmp_path / "2026-07-06.md"
     monday.write_text("Monday note", encoding="utf-8")
     weekly_note = "# Weekly\nresult::\n\n## Goal\n- Ship it\n"
@@ -257,15 +253,13 @@ def test_creates_saves_and_sends_review_draft_when_coach_context_is_empty(monkey
         ) as render,
         patch.object(
             review_draft.llm_client, "generate_llm_response", return_value=DRAFT_5
-        ) as generate,
-        patch.object(review_draft, "send_line_push", return_value=True) as send,
+        ),
     ):
         assert review_draft.main("2026-07-12") is True
 
     collect_mock.assert_called_once()
     assert render.call_args.args[1]["COACH_CONTEXT"] == ""
     assert DRAFT_5 in weekly_path.read_text(encoding="utf-8")
-    send.assert_called_once_with("token", "target", DRAFT_5)
 
 
 def test_rejects_draft_missing_coach_heading_when_coach_context_present(monkeypatch, tmp_path, caplog):
@@ -281,16 +275,14 @@ def test_rejects_draft_missing_coach_heading_when_coach_context_present(monkeypa
         patch.object(review_draft.prompt, "render_prompt", return_value="rendered"),
         # LLM returns 5-heading draft instead of required 6-heading draft
         patch.object(review_draft.llm_client, "generate_llm_response", return_value=DRAFT_5),
-        patch.object(review_draft, "send_line_push") as send,
         caplog.at_level(logging.WARNING),
     ):
         assert review_draft.main("2026-07-12") is False
 
-    send.assert_not_called()
     assert "LLM response did not use the required weekly review headings" in caplog.text
 
 
-def test_saved_draft_retry_path_untouched_for_both_5_and_6_headings(monkeypatch, tmp_path):
+def test_saved_draft_returns_true_without_regenerating(monkeypatch, tmp_path):
     weekly_note_5 = (
         "result::\n"
         f"{review_draft.REVIEW_DRAFT_START_MARKER}\n{DRAFT_5}\n"
@@ -301,13 +293,11 @@ def test_saved_draft_retry_path_untouched_for_both_5_and_6_headings(monkeypatch,
     with (
         patch.object(review_draft, "_collect_coach_context") as collect_mock,
         patch.object(review_draft.llm_client, "generate_llm_response") as generate,
-        patch.object(review_draft, "send_line_push", return_value=True) as send,
     ):
         assert review_draft.main("2026-07-12") is True
 
     collect_mock.assert_not_called()
     generate.assert_not_called()
-    send.assert_called_once_with("token", "target", DRAFT_5)
 
     # Test 6-heading saved draft
     weekly_note_6 = (
@@ -320,13 +310,11 @@ def test_saved_draft_retry_path_untouched_for_both_5_and_6_headings(monkeypatch,
     with (
         patch.object(review_draft, "_collect_coach_context") as collect_mock,
         patch.object(review_draft.llm_client, "generate_llm_response") as generate,
-        patch.object(review_draft, "send_line_push", return_value=True) as send,
     ):
         assert review_draft.main("2026-07-12") is True
 
     collect_mock.assert_not_called()
     generate.assert_not_called()
-    send.assert_called_once_with("token", "target", DRAFT_6)
 
 
 def test_skips_when_result_field_already_has_value(monkeypatch, tmp_path):
@@ -335,32 +323,28 @@ def test_skips_when_result_field_already_has_value(monkeypatch, tmp_path):
     with (
         patch.object(review_draft, "_collect_coach_context") as collect_mock,
         patch.object(review_draft.llm_client, "generate_llm_response") as generate,
-        patch.object(review_draft, "send_line_push") as send,
     ):
         assert review_draft.main("2026-07-12") is False
 
     collect_mock.assert_not_called()
     generate.assert_not_called()
-    send.assert_not_called()
 
 
-def test_no_daily_notes_does_not_generate_or_send(monkeypatch, tmp_path):
+def test_no_daily_notes_does_not_generate_or_save(monkeypatch, tmp_path):
     weekly_path = _configure(monkeypatch, tmp_path, "result::", {})
 
     with (
         patch.object(review_draft, "_collect_coach_context") as collect_mock,
         patch.object(review_draft.llm_client, "generate_llm_response") as generate,
-        patch.object(review_draft, "send_line_push") as send,
     ):
         assert review_draft.main("2026-07-12") is False
 
     assert not weekly_path.exists()
     collect_mock.assert_not_called()
     generate.assert_not_called()
-    send.assert_not_called()
 
 
-def test_empty_llm_response_does_not_save_or_send(monkeypatch, tmp_path):
+def test_empty_llm_response_does_not_save(monkeypatch, tmp_path):
     daily_note = tmp_path / "2026-07-06.md"
     daily_note.write_text("Monday note", encoding="utf-8")
     weekly_path = _configure(
@@ -371,15 +355,13 @@ def test_empty_llm_response_does_not_save_or_send(monkeypatch, tmp_path):
         patch.object(review_draft, "_collect_coach_context", return_value=""),
         patch.object(review_draft.prompt, "render_prompt", return_value="rendered"),
         patch.object(review_draft.llm_client, "generate_llm_response", return_value=""),
-        patch.object(review_draft, "send_line_push") as send,
     ):
         assert review_draft.main(datetime(2026, 7, 12)) is False
 
     assert not weekly_path.exists()
-    send.assert_not_called()
 
 
-def test_write_failure_does_not_send(monkeypatch, tmp_path):
+def test_write_failure_returns_false(monkeypatch, tmp_path):
     daily_note = tmp_path / "2026-07-06.md"
     daily_note.write_text("Monday note", encoding="utf-8")
     _configure(monkeypatch, tmp_path, "result::", {"2026-07-06": daily_note})
@@ -391,8 +373,6 @@ def test_write_failure_does_not_send(monkeypatch, tmp_path):
             review_draft.llm_client, "generate_llm_response", return_value=DRAFT_5
         ),
         patch.object(Path, "write_text", side_effect=OSError("disk full")),
-        patch.object(review_draft, "send_line_push") as send,
     ):
         assert review_draft.main("2026-07-12") is False
 
-    send.assert_not_called()

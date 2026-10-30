@@ -24,6 +24,7 @@ from obsidian_ai_hub import (
     search_obsidian_vault,
     review_draft,
 )
+from obsidian_ai_hub.coach import weekly_checkin
 from obsidian_ai_hub.handler import add_research_theme
 
 # Configure logging
@@ -41,6 +42,7 @@ def register_hitl_handlers():
     from obsidian_ai_hub.memory.maintenance import run_approved_maintenance
     from obsidian_ai_hub.memory.interview import apply_interview_answers
     from obsidian_ai_hub.calendar.hitl import add_approved_calendar_event
+    from obsidian_ai_hub.coach.weekly_checkin import apply_weekly_checkin
     from obsidian_ai_hub.reminders.hitl import add_approved_reminder
     from obsidian_ai_hub.agents.ask_user_handler import handle_agent_ask_user, handle_coding_ask_user
     from obsidian_ai_hub.summary.person_candidates_handler import apply_person_candidates_handler
@@ -52,6 +54,7 @@ def register_hitl_handlers():
     register_handler("research.run_approved_suggestion", run_approved_suggestion)
     register_handler("memory.apply_maintenance_proposals", run_approved_maintenance)
     register_handler("memory.apply_interview_answers", apply_interview_answers)
+    register_handler("coach.apply_weekly_checkin", apply_weekly_checkin)
     register_handler("calendar.add_approved_event", add_approved_calendar_event)
     register_handler("reminders.add_approved_reminder", add_approved_reminder)
     register_handler("agents.ask_user", handle_agent_ask_user)
@@ -881,6 +884,7 @@ def main():
         ran = True
     if args.review_draft:
         run_and_log(lambda: review_draft.main(args.review_week_date), "review_draft", {"review_week_date": args.review_week_date})
+        run_and_log(lambda: weekly_checkin.main(args.review_week_date), "weekly_checkin", {"review_week_date": args.review_week_date})
         ran = True
     if args.summerize_month:
         run_and_log(lambda: summerize_month.main(args.month), "summerize_month", {"month": args.month})

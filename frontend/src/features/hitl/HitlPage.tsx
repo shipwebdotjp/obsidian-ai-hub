@@ -9,6 +9,7 @@ import {
 } from "../../api/client";
 import type { HitlRun, HitlRunDetail, HitlQuestion } from "../../api/types";
 import { WaitingRunQuestionCard, toQuestionItems } from "../../components/InConversationQuestionCard";
+import WeeklyCheckinCard from "./WeeklyCheckinCard";
 import PaginationBar from "../../components/PaginationBar";
 import SplitHandle from "../../components/SplitHandle";
 import { usePagination } from "../../hooks/usePagination";
@@ -136,6 +137,7 @@ function asReminderContext(context: unknown): ReminderContext | null {
 function displayTypeLabel(dt: string | null | undefined): string {
   if (!dt) return "";
   if (dt === "in_conversation_question") return "ASK";
+  if (dt === "weekly_checkin") return "週次チェックイン";
   if (dt === "daily_person_changes") return "日次人物変更候補";
   return dt;
 }
@@ -725,7 +727,8 @@ export default function HitlPage() {
             })()}
 
             {/* Standard Question Set List */}
-            {selectedRun.display_type !== "in_conversation_question" && (
+            {selectedRun.display_type !== "in_conversation_question" &&
+              selectedRun.display_type !== "weekly_checkin" && (
               <div className="mt-8 space-y-6">
               <h3 className="text-sm font-bold text-slate-700 border-l-4 border-slate-700 pl-2">
                 質問
@@ -1246,6 +1249,23 @@ export default function HitlPage() {
                 })}
               </div>
             </div>
+            )}
+
+            {/* Weekly check-in: single form covering note + next step + decision */}
+            {selectedRun.display_type === "weekly_checkin" && (
+              <WeeklyCheckinCard
+                runId={selectedRun.run_id}
+                questions={selectedRun.questions}
+                disabled={!["pending_user", "ready_to_resume"].includes(selectedRun.status)}
+                onSubmitAnswer={async (qKey, value) => {
+                  await submitHitlAnswer(selectedRun.run_id, qKey, value, null);
+                }}
+                onSubmitted={async () => {
+                  setSuccessMessage("回答を正常に送信しました。");
+                  await loadDetail(selectedRun.run_id, true);
+                  await reloadRuns();
+                }}
+              />
             )}
           </div>
         ) : (

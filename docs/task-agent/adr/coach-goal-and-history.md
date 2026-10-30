@@ -46,6 +46,12 @@ Accepted
   Thread 一覧の読み取り時に現在の Reflection 行から射影する。
   本文編集が履歴表示に反映され、決定種別は保存時点のまま残る。
 
+## 追加決定（週次チェックインの配信形態）
+
+- Phase 1 の「手動の Web 内 Reflection に限定し、Scheduler、外部通知を使わない」は
+  [週次チェックインをHITLの問いとして配信し、先週の一歩を参照する](weekly-checkin-hitl-question.md)
+  で置き換える。Goal / Focus / Reflection の所有関係と時系列保持はこの ADR のままとする。
+
 ## Consequences
 
 - SQLite migration と Coach 専用の API/UI が必要になる。

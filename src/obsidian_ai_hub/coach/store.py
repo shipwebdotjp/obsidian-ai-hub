@@ -299,6 +299,33 @@ class CoachStore:
             return None
         return row["latest_week"]
 
+    def get_latest_reflection_for_goal(
+        self, conn: sqlite3.Connection, goal_id: str
+    ) -> Optional[dict[str, Any]]:
+        """Return the latest recorded Reflection row for the goal, or None.
+
+        Used as the context for generating the next weekly check-in question
+        (the previous ``next_week_scope`` the user decided on).
+        """
+        row = conn.execute(
+            """
+            SELECT r.reflection_id, r.focus_id, r.iso_week_monday, r.worked_well,
+                   r.difficult_reason, r.learnings, r.next_week_scope, r.decision_type,
+                   r.target_focus_id, r.created_at, r.updated_at,
+                   f.name AS focus_name, tf.name AS target_focus_name
+            FROM coach_weekly_reflections r
+            JOIN coach_focuses f ON r.focus_id = f.focus_id
+            LEFT JOIN coach_focuses tf ON r.target_focus_id = tf.focus_id
+            WHERE f.goal_id = ?
+            ORDER BY r.iso_week_monday DESC
+            LIMIT 1
+            """,
+            (goal_id,),
+        ).fetchone()
+        if not row:
+            return None
+        return dict(row)
+
     def list_reflections_by_focus(
         self, conn: sqlite3.Connection, focus_id: str
     ) -> list[dict[str, Any]]:

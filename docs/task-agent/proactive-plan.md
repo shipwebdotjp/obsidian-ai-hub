@@ -208,6 +208,9 @@ Phase 2 以降、日々必要なら小さな一歩を表示する
 - 初期の根拠はユーザーが入力した Goal / Focus / Reflection だけに限定する。関連ノート、
   Activity、既存 `projects.goal`、Experiment は使わず、全ユーザー情報を返す
   `user_context_snapshot` を Agent Registry や `AUTO_POLICY_TOOL_IDS` に公開しない。
+  週次チェックインの質問生成に限り、対象週のノートを読む判断は
+  [ADR: 週次チェックインをHITLの問いとして配信し、先週の一歩を参照する](adr/weekly-checkin-hitl-question.md)
+  を正とする。汎用 Capability を作らない境界は維持する。
 
 ### 境界
 
