@@ -175,6 +175,11 @@ def main():
         help="AIプランナー提案を生成して planner_proposals に保存",
     )
     parser.add_argument(
+        "--planner-dry-run",
+        action="store_true",
+        help="AIプランナー提案を生成して検証結果だけ表示（保存・通知しない）",
+    )
+    parser.add_argument(
         "--screenshot",
         action="store_true",
         help="macOSのスクリーンショットを撮影してInboxに保存",
@@ -592,6 +597,7 @@ def main():
             args.add_research_theme,
             args.suggest_research_theme,
             args.generate_planner_proposals,
+            getattr(args, "planner_dry_run", False),
             args.screenshot,
             args.scan_line_inbox,
             args.log_activity,
@@ -646,6 +652,7 @@ def main():
             args.add_research_theme,
             args.suggest_research_theme,
             args.generate_planner_proposals,
+            getattr(args, "planner_dry_run", False),
             args.screenshot,
             args.scan_line_inbox,
             args.log_activity,
@@ -696,6 +703,7 @@ def main():
             args.add_research_theme,
             args.suggest_research_theme,
             args.generate_planner_proposals,
+            getattr(args, "planner_dry_run", False),
             args.screenshot,
             args.scan_line_inbox,
             args.log_activity,
@@ -932,6 +940,11 @@ def main():
         from obsidian_ai_hub.planner.suggest import main as planner_suggest_main
 
         run_and_log(planner_suggest_main, "generate_planner_proposals", {})
+        ran = True
+    if getattr(args, "planner_dry_run", False):
+        from obsidian_ai_hub.planner.suggest import dry_run_main as planner_dry_run_main
+
+        run_and_log(planner_dry_run_main, "planner_dry_run", {})
         ran = True
     if args.screenshot:
         run_and_log(lambda: take_screenshot.main(args.display), "take_screenshot", {"display": args.display})

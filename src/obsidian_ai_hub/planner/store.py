@@ -6,7 +6,7 @@ import sqlite3
 import unicodedata
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 
 from obsidian_ai_hub.database import get_db_connection
@@ -393,6 +393,55 @@ def delete_proposed_proposal(
         deleted = cursor.rowcount > 0
         active_conn.commit()
     return deleted
+
+
+def expire_stale_proposals(
+    *,
+    today: Optional[date] = None,
+    max_age_days: int = 30,
+    now_dt: Optional[datetime] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> int:
+    """Expire proposals that are past their anchor date or too old.
+
+    A proposal stops being a useful suggestion once the date it points at has
+    passed, and an unresolved proposal that has sat around for weeks is noise
+    on the Planner screen. Both are marked `expired` (history is preserved,
+    rows are never deleted) so the fingerprint is released for future reuse.
+
+    Returns the number of proposals expired.
+    """
+    if max_age_days < 0:
+        raise ValueError("max_age_days must be non-negative")
+
+    reference = today or date.today()
+    if now_dt is None:
+        now_dt = datetime.now(JST)
+    elif now_dt.tzinfo is not None:
+        now_dt = now_dt.astimezone(JST)
+    now = now_dt.isoformat(timespec="seconds")
+    cutoff_iso = (now_dt - timedelta(days=max_age_days)).isoformat(timespec="seconds")
+
+    with auto_connection(conn) as (active_conn, _):
+        cursor = active_conn.cursor()
+        cursor.execute(
+            """
+            UPDATE planner_proposals
+            SET status = 'expired', expired_at = ?, updated_at = ?
+            WHERE status = 'proposed'
+              AND (
+                CASE kind
+                  WHEN 'calendar' THEN date(start_time)
+                  ELSE date(due_date)
+                END < ?
+                OR created_at < ?
+              )
+            """,
+            (now, now, reference.isoformat(), cutoff_iso),
+        )
+        changed = cursor.rowcount
+        active_conn.commit()
+    return changed
 
 
 def cleanup_expired_proposals(

@@ -50,7 +50,8 @@ python -m obsidian_ai_hub <flag> [options]
 | フラグ | 引数 | 説明 |
 | --- | --- | --- |
 | `--notify-today-schedule` | — | 今日の予定を LINE へ通知する。 |
-| `--generate-planner-proposals` | — | AI プランナー提案を生成して保存・通知する。 |
+| `--generate-planner-proposals` | — | AI プランナー提案を生成して保存・通知する。0件は正常。 |
+| `--planner-dry-run` | — | AI プランナー提案を検証だけ行い、候補と棄却理由を表示する（保存・通知しない）。 |
 
 ## バックアップ・同期
 

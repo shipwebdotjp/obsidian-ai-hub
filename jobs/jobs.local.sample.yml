@@ -82,7 +82,8 @@
     minute: 15
   command: 'uv --directory /path/to/obsidian-ai-hub run -m obsidian_ai_hub --memory-extract'
 
-# Daily 06:00 AI planner proposal generation (low-to-medium confidence schedule/reminder candidates).
+# Daily 06:00 AI planner proposals. Only explicit items written in daily notes
+# become candidates; zero proposals is the normal outcome.
 - id: generate_planner_proposals_daily
   enabled: false
   schedule:

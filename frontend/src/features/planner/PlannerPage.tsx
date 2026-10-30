@@ -333,7 +333,11 @@ export default function PlannerPage() {
     setBusy(true);
     try {
       const res = await generatePlannerProposals();
-      notify(`AI提案を${res.generated}件生成しました`);
+      notify(
+        res.generated > 0
+          ? `AI提案を${res.generated}件生成しました`
+          : "新しい提案はありませんでした",
+      );
       setRefreshKey((v) => v + 1);
     } catch (e) {
       notify(errorMessage(e), "error");
@@ -415,6 +419,9 @@ export default function PlannerPage() {
               ).replace(/-/g, "/")}`}
         </span>
         <div className="ml-auto flex gap-2">
+          <span className="hidden items-center text-xs text-slate-500 sm:flex">
+            提案は明示的な用件のみ（0件が通常）
+          </span>
           <button
             type="button"
             onClick={() => setRefreshKey((v) => v + 1)}

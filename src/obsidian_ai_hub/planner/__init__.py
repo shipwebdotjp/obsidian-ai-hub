@@ -1,13 +1,22 @@
 """AI proposal planner subpackage.
 
-AI proposals are low-to-medium confidence candidates ("you might want to
-schedule/remind this") generated from the app's full context. They live in
-their own SQLite table (planner_proposals) and are manipulated through their
-own APIs. This layer never touches the existing Inbox -> HITL -> Apple
-registration flow.
+AI proposals are candidates the planner derived from a line the person wrote in
+their daily notes ("you might want to schedule/remind this"); zero candidates is
+the normal outcome. They live in their own SQLite table (planner_proposals) and
+are manipulated through their own APIs. This layer never touches the existing
+Inbox -> HITL -> Apple registration flow.
 """
 
-from obsidian_ai_hub.planner import apple, cache, context, feedback, promote, store, suggest
+from obsidian_ai_hub.planner import (
+    apple,
+    cache,
+    context,
+    feedback,
+    notes,
+    promote,
+    store,
+    suggest,
+)
 from obsidian_ai_hub.planner.feedback import (
     ALLOWED_REJECTION_REASONS,
     REJECTION_REASONS,
@@ -20,6 +29,7 @@ from obsidian_ai_hub.planner.store import (
     cleanup_expired_proposals,
     compute_fingerprint,
     create_proposal,
+    expire_stale_proposals,
     find_active_by_fingerprint,
     get_proposal,
     list_proposals,
@@ -41,11 +51,13 @@ __all__ = [
     "compute_fingerprint",
     "context",
     "create_proposal",
+    "expire_stale_proposals",
     "feedback",
     "find_active_by_fingerprint",
     "generate_proposals",
     "get_proposal",
     "list_proposals",
+    "notes",
     "promote",
     "promote_proposal",
     "reject_proposal",

@@ -276,3 +276,99 @@ def test_cleanup_expired_proposals_does_not_touch_promoted():
     conn.commit()
     assert store.cleanup_expired_proposals(days=7, conn=conn, now_dt=_now_jst()) == 0
     assert store.get_proposal(rec["proposal_id"], conn=conn)["status"] == "promoted"
+
+
+def test_expire_stale_proposals_expires_past_anchor_and_old_rows():
+    now = _now_jst()
+    today = now.date()
+    conn = get_db_connection()
+    past_anchor = store.create_proposal(
+        kind="reminder",
+        title="Past reminder",
+        rationale="r",
+        generation_source="s",
+        due_date="2020-01-01",
+        conn=conn,
+    )
+    future_anchor = store.create_proposal(
+        kind="reminder",
+        title="Future reminder",
+        rationale="r",
+        generation_source="s",
+        due_date="2099-01-01",
+        conn=conn,
+    )
+    old_but_future_anchor = store.create_proposal(
+        kind="reminder",
+        title="Old linkage",
+        rationale="r",
+        generation_source="s",
+        due_date="2099-01-02",
+        conn=conn,
+    )
+    conn.execute(
+        "UPDATE planner_proposals SET created_at = ? WHERE proposal_id = ?",
+        (
+            (now - timedelta(days=60)).isoformat(timespec="seconds"),
+            old_but_future_anchor["proposal_id"],
+        ),
+    )
+    conn.commit()
+
+    changed = store.expire_stale_proposals(
+        today=today, max_age_days=30, now_dt=now, conn=conn
+    )
+
+    assert changed == 2
+    assert store.get_proposal(past_anchor["proposal_id"], conn=conn)["status"] == "expired"
+    assert (
+        store.get_proposal(old_but_future_anchor["proposal_id"], conn=conn)["status"]
+        == "expired"
+    )
+    assert store.get_proposal(future_anchor["proposal_id"], conn=conn)["status"] == "proposed"
+
+
+def test_expire_stale_proposals_keeps_null_anchor_until_max_age():
+    now = _now_jst()
+    conn = get_db_connection()
+    rec = store.create_proposal(
+        kind="reminder", title="No anchor", rationale="r", generation_source="s", conn=conn
+    )
+
+    assert (
+        store.expire_stale_proposals(
+            today=now.date(), max_age_days=30, now_dt=now, conn=conn
+        )
+        == 0
+    )
+    assert store.get_proposal(rec["proposal_id"], conn=conn)["status"] == "proposed"
+
+    later = now + timedelta(days=31)
+    assert (
+        store.expire_stale_proposals(
+            today=later.date(), max_age_days=30, now_dt=later, conn=conn
+        )
+        == 1
+    )
+
+
+def test_expire_stale_proposals_does_not_touch_terminal_status():
+    now = _now_jst()
+    conn = get_db_connection()
+    rec = store.create_proposal(
+        kind="calendar",
+        title="Promoted past",
+        rationale="r",
+        generation_source="s",
+        start_time="2020-01-01T10:00:00",
+        conn=conn,
+    )
+    store.transition_status(rec["proposal_id"], to_status="promoted", conn=conn)
+
+    assert (
+        store.expire_stale_proposals(
+            today=now.date(), max_age_days=30, now_dt=now, conn=conn
+        )
+        == 0
+    )
+    assert store.get_proposal(rec["proposal_id"], conn=conn)["status"] == "promoted"
