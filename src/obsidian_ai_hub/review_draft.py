@@ -164,11 +164,11 @@ def _collect_coach_context() -> str:
 
 
 def _has_expected_format(draft: str, expect_coach: bool = False) -> bool:
-    headings = WITH_COACH_REVIEW_HEADINGS if expect_coach else BASE_REVIEW_HEADINGS
-    positions = [draft.find(heading) for heading in headings]
-    return all(position >= 0 for position in positions) and positions == sorted(
-        positions
+    expected_headings = WITH_COACH_REVIEW_HEADINGS if expect_coach else BASE_REVIEW_HEADINGS
+    extracted_headings = tuple(
+        line.strip() for line in draft.splitlines() if line.strip().startswith("## ")
     )
+    return extracted_headings == expected_headings
 
 
 def _send_review_draft(draft: str) -> bool:
@@ -214,9 +214,19 @@ def review_draft(target_date: datetime | date_type | str | None = None) -> bool:
         return False
 
     coach_context = _collect_coach_context()
+    prompt_path = config.REVIEW_DRAFT_PROMPT_PATH
+    try:
+        prompt_text = prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else ""
+    except Exception as exc:
+        logger.warning("Could not read review draft prompt path %s: %s", prompt_path, exc)
+        prompt_text = ""
+
+    prompt_supports_coach = "COACH_CONTEXT" in prompt_text
+    expect_coach = bool(coach_context) and prompt_supports_coach
+
     try:
         rendered_prompt = prompt.render_prompt(
-            config.REVIEW_DRAFT_PROMPT_PATH,
+            prompt_path,
             {
                 "WEEKLY_NOTE": weekly_note,
                 "DAILY_NOTES": daily_notes,
@@ -239,7 +249,7 @@ def review_draft(target_date: datetime | date_type | str | None = None) -> bool:
     if not draft:
         logger.warning("LLM returned an empty weekly review draft")
         return False
-    if not _has_expected_format(draft, expect_coach=bool(coach_context)):
+    if not _has_expected_format(draft, expect_coach=expect_coach):
         logger.warning("LLM response did not use the required weekly review headings")
         return False
 

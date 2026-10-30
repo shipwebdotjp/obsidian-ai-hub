@@ -149,7 +149,7 @@ def test_has_expected_format_validation():
     assert review_draft._has_expected_format(DRAFT_5, expect_coach=False) is True
     assert review_draft._has_expected_format(DRAFT_5, expect_coach=True) is False
     assert review_draft._has_expected_format(DRAFT_6, expect_coach=True) is True
-    assert review_draft._has_expected_format(DRAFT_6, expect_coach=False) is True
+    assert review_draft._has_expected_format(DRAFT_6, expect_coach=False) is False
 
     out_of_order = """## 来週の一歩
 - 着手する
@@ -170,14 +170,19 @@ def test_has_expected_format_validation():
 
 def test_creates_saves_and_sends_review_draft_with_coach_context(monkeypatch, tmp_path):
     monday = tmp_path / "2026-07-06.md"
+    wednesday = tmp_path / "2026-07-08.md"
     monday.write_text("Monday note", encoding="utf-8")
+    wednesday.write_text("Wednesday note", encoding="utf-8")
     weekly_note = "# Weekly\nresult::\n\n## Goal\n- Ship it\n"
     weekly_path = _configure(
         monkeypatch,
         tmp_path,
         weekly_note,
-        {"2026-07-06": monday},
+        {"2026-07-06": monday, "2026-07-08": wednesday},
     )
+
+    prompt_file = review_draft.config.REVIEW_DRAFT_PROMPT_PATH
+    prompt_file.write_text("Prompt containing ${COACH_CONTEXT}", encoding="utf-8")
 
     coach_block = "【参考: Coach の Goal / Focus】\n- Goal: Ship app\n  - Focus: Quality (status: active)"
 
@@ -195,11 +200,43 @@ def test_creates_saves_and_sends_review_draft_with_coach_context(monkeypatch, tm
 
     collect_mock.assert_called_once()
     assert render.call_args.args[1]["COACH_CONTEXT"] == coach_block
+    assert "Monday note" in render.call_args.args[1]["DAILY_NOTES"]
+    assert "Wednesday note" in render.call_args.args[1]["DAILY_NOTES"]
     generate.assert_called_once_with(
         provider="test-provider", model="test-model", prompt="rendered", max_tokens=16384
     )
     assert DRAFT_6 in weekly_path.read_text(encoding="utf-8")
     send.assert_called_once_with("token", "target", DRAFT_6)
+
+
+def test_old_custom_prompt_without_coach_context_accepts_5_heading_draft(monkeypatch, tmp_path):
+    monday = tmp_path / "2026-07-06.md"
+    monday.write_text("Monday note", encoding="utf-8")
+    weekly_note = "# Weekly\nresult::\n"
+    weekly_path = _configure(
+        monkeypatch,
+        tmp_path,
+        weekly_note,
+        {"2026-07-06": monday},
+    )
+
+    prompt_file = review_draft.config.REVIEW_DRAFT_PROMPT_PATH
+    prompt_file.write_text("Old prompt template without coach placeholder", encoding="utf-8")
+
+    coach_block = "Coach context exists in DB"
+
+    with (
+        patch.object(review_draft, "_collect_coach_context", return_value=coach_block),
+        patch.object(review_draft.prompt, "render_prompt", return_value="rendered"),
+        patch.object(
+            review_draft.llm_client, "generate_llm_response", return_value=DRAFT_5
+        ),
+        patch.object(review_draft, "send_line_push", return_value=True) as send,
+    ):
+        assert review_draft.main("2026-07-12") is True
+
+    assert DRAFT_5 in weekly_path.read_text(encoding="utf-8")
+    send.assert_called_once_with("token", "target", DRAFT_5)
 
 
 def test_creates_saves_and_sends_review_draft_when_coach_context_is_empty(monkeypatch, tmp_path):
@@ -235,6 +272,9 @@ def test_rejects_draft_missing_coach_heading_when_coach_context_present(monkeypa
     monday = tmp_path / "2026-07-06.md"
     monday.write_text("Monday note", encoding="utf-8")
     _configure(monkeypatch, tmp_path, "# Weekly\nresult::\n", {"2026-07-06": monday})
+
+    prompt_file = review_draft.config.REVIEW_DRAFT_PROMPT_PATH
+    prompt_file.write_text("Prompt containing ${COACH_CONTEXT}", encoding="utf-8")
 
     with (
         patch.object(review_draft, "_collect_coach_context", return_value="Coach block"),
