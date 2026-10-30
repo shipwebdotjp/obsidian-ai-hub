@@ -132,6 +132,7 @@ from obsidian_ai_hub.web.services.person_relations import (
     update_relation_evidence,
 )
 from obsidian_ai_hub.web.services.planner import (
+    delete_planner_proposal,
     generate_planner_proposals,
     get_planner_proposal,
     get_planner_timeline,

@@ -129,6 +129,48 @@ def test_planner_proposals_list_and_get(test_memory_db_path, client):
     assert response.status_code == 404
 
 
+def test_planner_proposal_delete_physically_removes_and_allows_recreate(
+    test_memory_db_path, client
+):
+    proposal = _calendar_proposal()
+
+    response = client.delete(f"/api/v1/planner/proposals/{proposal['proposal_id']}")
+    assert response.status_code == 204
+    assert response.content == b""
+    assert (
+        client.get(f"/api/v1/planner/proposals/{proposal['proposal_id']}").status_code
+        == 404
+    )
+    listed = client.get("/api/v1/planner/proposals")
+    assert all(p["proposal_id"] != proposal["proposal_id"] for p in listed.json()["items"])
+
+    recreated = _calendar_proposal()
+    assert recreated["proposal_id"] != proposal["proposal_id"]
+    assert (
+        client.get(f"/api/v1/planner/proposals/{recreated['proposal_id']}").status_code
+        == 200
+    )
+
+
+def test_planner_proposal_delete_unknown_returns_404(test_memory_db_path, client):
+    response = client.delete("/api/v1/planner/proposals/pp_missing")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.parametrize("to_status", ["rejected", "promoted", "expired"])
+def test_planner_proposal_delete_non_proposed_returns_409_and_keeps_row(
+    test_memory_db_path, client, to_status
+):
+    proposal = _calendar_proposal()
+    assert store.transition_status(proposal["proposal_id"], to_status=to_status) is True
+
+    response = client.delete(f"/api/v1/planner/proposals/{proposal['proposal_id']}")
+
+    assert response.status_code == 409
+    assert store.get_proposal(proposal["proposal_id"])["status"] == to_status
+
+
 def test_planner_proposal_update(test_memory_db_path, client):
     proposal = _calendar_proposal()
 

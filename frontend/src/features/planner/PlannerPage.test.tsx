@@ -6,6 +6,7 @@ import PlannerPage from "./PlannerPage";
 vi.mock("../../api/client", () => ({
   getPlannerTimeline: vi.fn(),
   updatePlannerProposal: vi.fn(),
+  deletePlannerProposal: vi.fn(),
   rejectPlannerProposal: vi.fn(),
   promotePlannerProposal: vi.fn(),
   generatePlannerProposals: vi.fn(),
@@ -21,6 +22,7 @@ vi.mock("../../api/client", () => ({
 import {
   getPlannerTimeline,
   updatePlannerProposal,
+  deletePlannerProposal,
   rejectPlannerProposal,
   promotePlannerProposal,
   generatePlannerProposals,
@@ -28,6 +30,7 @@ import {
 
 const mockGetTimeline = vi.mocked(getPlannerTimeline);
 const mockUpdate = vi.mocked(updatePlannerProposal);
+const mockDelete = vi.mocked(deletePlannerProposal);
 const mockReject = vi.mocked(rejectPlannerProposal);
 const mockPromote = vi.mocked(promotePlannerProposal);
 const mockGenerate = vi.mocked(generatePlannerProposals);
@@ -259,7 +262,7 @@ describe("PlannerPage", () => {
     );
   });
 
-  it("opens the detail panel for a selected AI proposal and rejects it", async () => {
+  it("opens the detail panel for a selected AI proposal and rejects it only after confirming", async () => {
     const user = userEvent.setup();
     render(<PlannerPage />);
 
@@ -272,8 +275,11 @@ describe("PlannerPage", () => {
     expect(screen.getByText("AI提案の編集")).toBeInTheDocument();
     expect(screen.getByText("最近のノートに予約希望があったため")).toBeInTheDocument();
 
-    mockReject.mockResolvedValue({ ...sampleTimeline.ai_proposals[0], status: "rejected" } as any);
     await user.click(screen.getByRole("button", { name: "却下" }));
+    expect(mockReject).not.toHaveBeenCalled();
+
+    mockReject.mockResolvedValue({ ...sampleTimeline.ai_proposals[0], status: "rejected" } as any);
+    await user.click(screen.getByRole("button", { name: "却下を確定" }));
 
     await waitFor(() => {
       expect(mockReject).toHaveBeenCalledWith("pp-1", { reason: null, comment: null });
@@ -289,11 +295,12 @@ describe("PlannerPage", () => {
     });
 
     await user.click(screen.getByText(/歯科検診/));
+    await user.click(screen.getByRole("button", { name: "却下" }));
     await user.click(screen.getByRole("button", { name: "既知・重複" }));
     await user.type(screen.getByLabelText("却下コメント"), "すでに予定あり");
 
     mockReject.mockResolvedValue({ ...sampleTimeline.ai_proposals[0], status: "rejected" } as any);
-    await user.click(screen.getByRole("button", { name: "却下" }));
+    await user.click(screen.getByRole("button", { name: "却下を確定" }));
 
     await waitFor(() => {
       expect(mockReject).toHaveBeenCalledWith("pp-1", {
@@ -337,11 +344,36 @@ describe("PlannerPage", () => {
     await user.clear(titleInput);
     await user.type(titleInput, "歯科検診(変更)");
     mockUpdate.mockResolvedValue({ ...sampleTimeline.ai_proposals[0], title: "歯科検診(変更)" } as any);
-    await user.click(screen.getByRole("button", { name: "保存" }));
+    await user.click(screen.getByRole("button", { name: "変更を保存" }));
 
     await waitFor(() => {
       expect(mockUpdate).toHaveBeenCalledWith("pp-1", expect.objectContaining({ title: "歯科検診(変更)" }));
     });
+    expect(mockReject).not.toHaveBeenCalled();
+  });
+
+  it("deletes the selected proposal immediately without a confirmation and closes the panel", async () => {
+    const user = userEvent.setup();
+    render(<PlannerPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/歯科検診/)).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByText(/歯科検診/));
+    mockDelete.mockResolvedValue(undefined);
+
+    await user.click(screen.getByRole("button", { name: "完全に削除" }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(mockDelete).toHaveBeenCalledTimes(1);
+    });
+    expect(mockDelete).toHaveBeenCalledWith("pp-1");
+    await waitFor(() => {
+      expect(screen.queryByText("AI提案の編集")).not.toBeInTheDocument();
+    });
+    expect(await screen.findByText("完全に削除しました")).toBeInTheDocument();
   });
 
   it("generates proposals via the generate button", async () => {

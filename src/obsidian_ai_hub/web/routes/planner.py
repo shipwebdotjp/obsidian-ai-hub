@@ -2,7 +2,7 @@ from datetime import date
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from obsidian_ai_hub.web import schemas, service
 from obsidian_ai_hub.web.routes.deps import require_bearer_token
@@ -71,6 +71,19 @@ def update_planner_proposal(
         raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete(
+    "/planner/proposals/{proposal_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+def delete_planner_proposal(proposal_id: str, _=Depends(require_bearer_token)):
+    try:
+        service.delete_planner_proposal(proposal_id)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(

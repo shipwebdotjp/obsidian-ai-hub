@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 from unittest.mock import patch, MagicMock
 from langchain_core.messages import AIMessage
@@ -224,6 +226,106 @@ def test_opencode_go_anthropic_compatible_routing():
                     "x-opencode-session": "obsidian-ai-hub",
                 },
             )
+
+
+def test_opencode_go_kimi_k3_pro_fixes_temperature(caplog):
+    """kimi-k3.1-pro は指定 temperature にかかわらず 1 を送信する。"""
+    caplog.set_level(logging.WARNING, logger="obsidian_ai_hub.utils.llm_client")
+
+    for requested in (0.0, 0.7):
+        caplog.clear()
+        with (
+            patch(
+                "obsidian_ai_hub.utils.llm_client.config.OPENCODE_API_KEY",
+                "test_opencode_key",
+            ),
+            patch("langchain_openai.ChatOpenAI") as mock_chat_openai,
+        ):
+            llm_client.create_langchain_llm(
+                provider="opencode_go",
+                model="kimi-k3.1-pro",
+                temperature=requested,
+                max_tokens=256,
+            )
+
+        _, kwargs = mock_chat_openai.call_args
+        assert kwargs["temperature"] == 1, requested
+
+        warnings = [
+            record
+            for record in caplog.records
+            if record.name == "obsidian_ai_hub.utils.llm_client"
+            and record.levelno == logging.WARNING
+        ]
+        assert len(warnings) == 1, requested
+        message = warnings[0].getMessage()
+        assert "model=kimi-k3.1-pro" in message
+        assert f"requested_temperature={requested}" in message
+        assert "applied_temperature=1.0" in message
+
+
+def test_opencode_go_kimi_k3_pro_fixes_default_temperature():
+    """既定値 (0.7) のままでも kimi-k3.1-pro には 1 を送信する。"""
+    with (
+        patch(
+            "obsidian_ai_hub.utils.llm_client.config.OPENCODE_API_KEY",
+            "test_opencode_key",
+        ),
+        patch("langchain_openai.ChatOpenAI") as mock_chat_openai,
+    ):
+        llm_client.create_opencode_go_llm(model="kimi-k3.1-pro")
+
+    _, kwargs = mock_chat_openai.call_args
+    assert kwargs["temperature"] == 1
+
+
+def test_opencode_go_kimi_k3_pro_keeps_temperature_one(caplog):
+    """temperature 1 はそのまま送信し、正規化 warning を出さない。"""
+    caplog.set_level(logging.WARNING, logger="obsidian_ai_hub.utils.llm_client")
+
+    with (
+        patch(
+            "obsidian_ai_hub.utils.llm_client.config.OPENCODE_API_KEY",
+            "test_opencode_key",
+        ),
+        patch("langchain_openai.ChatOpenAI") as mock_chat_openai,
+    ):
+        llm_client.create_langchain_llm(
+            provider="opencode_go",
+            model="kimi-k3.1-pro",
+            temperature=1,
+            max_tokens=256,
+        )
+
+    _, kwargs = mock_chat_openai.call_args
+    assert kwargs["temperature"] == 1
+    assert not [
+        record
+        for record in caplog.records
+        if record.levelno == logging.WARNING
+        and "kimi-k3.1-pro" in record.getMessage()
+    ]
+
+
+def test_opencode_go_other_models_keep_temperature():
+    """kimi-k3.1-pro 以外の temperature は変更しない。"""
+    with (
+        patch(
+            "obsidian_ai_hub.utils.llm_client.config.OPENCODE_API_KEY",
+            "test_opencode_key",
+        ),
+        patch("langchain_openai.ChatOpenAI") as mock_chat_openai,
+    ):
+        for model in ("deepseek-v3", "kimi-latest", "kimi-k2.6"):
+            llm_client.create_langchain_llm(
+                provider="opencode_go",
+                model=model,
+                temperature=0.2,
+                max_tokens=256,
+            )
+            _, kwargs = mock_chat_openai.call_args
+            assert kwargs["temperature"] == 0.2, model
+            mock_chat_openai.reset_mock()
 
 
 def test_opencode_go_missing_api_key():

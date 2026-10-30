@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  deletePlannerProposal,
   generatePlannerProposals,
   getPlannerTimeline,
   promotePlannerProposal,
@@ -313,6 +314,21 @@ export default function PlannerPage() {
     }
   };
 
+  const handleDelete = async () => {
+    if (!selectedProposal) return;
+    setBusy(true);
+    try {
+      await deletePlannerProposal(selectedProposal.proposal_id);
+      notify("完全に削除しました");
+      setSelectedId(null);
+      setRefreshKey((v) => v + 1);
+    } catch (e) {
+      notify(errorMessage(e), "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleGenerate = async () => {
     setBusy(true);
     try {
@@ -574,6 +590,7 @@ export default function PlannerPage() {
                 onSave={handleSave}
                 onPromote={handlePromote}
                 onReject={handleReject}
+                onDelete={handleDelete}
                 onClose={() => setSelectedId(null)}
               />
             </div>

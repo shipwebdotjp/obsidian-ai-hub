@@ -372,6 +372,29 @@ def reject_proposal(
     return changed
 
 
+def delete_proposed_proposal(
+    proposal_id: str,
+    conn: Optional[sqlite3.Connection] = None,
+) -> bool:
+    """Physically delete a proposal that is still in status 'proposed'.
+
+    The delete is a single conditional statement, so a concurrent promotion,
+    rejection, or expiry leaves the row untouched. Returns False when the row
+    does not exist or is no longer 'proposed'. The fingerprint and rejection
+    history disappear with the row, which lets the same content be proposed
+    again.
+    """
+    with auto_connection(conn) as (active_conn, _):
+        cursor = active_conn.cursor()
+        cursor.execute(
+            "DELETE FROM planner_proposals WHERE proposal_id = ? AND status = 'proposed'",
+            (proposal_id,),
+        )
+        deleted = cursor.rowcount > 0
+        active_conn.commit()
+    return deleted
+
+
 def cleanup_expired_proposals(
     days: int = 7,
     conn: Optional[sqlite3.Connection] = None,

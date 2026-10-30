@@ -8,6 +8,7 @@ import random
 import re
 import time
 from contextvars import ContextVar
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, AsyncGenerator, Sequence, Tuple, Optional, List, Dict
 import logging
@@ -96,6 +97,65 @@ def _temperature_kwargs(
         )
         return {}
     return {"temperature": temperature}
+
+
+@dataclass(frozen=True)
+class ModelParameterConstraints:
+    """Provider-side parameter constraints for one model.
+
+    ``fixed_temperature`` pins the request ``temperature`` regardless of the
+    caller's value or the client default.  Add a model here instead of writing
+    a provider/model condition at each call site.
+    """
+
+    fixed_temperature: float | None = None
+
+
+# Keyed by (provider, normalized model ID).  opencode_go's kimi-k3.1-pro
+# accepts only temperature=1 and otherwise returns HTTP 400 invalid_request_error.
+MODEL_PARAMETER_CONSTRAINTS: dict[tuple[str, str], ModelParameterConstraints] = {
+    ("opencode_go", "kimi-k3.1-pro"): ModelParameterConstraints(
+        fixed_temperature=1.0
+    ),
+}
+
+
+def _normalized_model_id(model: str) -> str:
+    """Return the bare lowercase model ID used for constraint lookup."""
+    return (model or "").strip().rsplit("/", 1)[-1].lower()
+
+
+def resolve_temperature(
+    provider: str,
+    model: str,
+    temperature: float,
+    *,
+    warn: bool = True,
+) -> float:
+    """Return the temperature to send after applying model constraints.
+
+    The warning includes only the provider, normalized model ID and the
+    requested/applied values; it never contains prompts or credentials.
+    """
+    normalized_provider = (provider or "").strip().lower()
+    normalized_model = _normalized_model_id(model)
+    constraints = MODEL_PARAMETER_CONSTRAINTS.get(
+        (normalized_provider, normalized_model)
+    )
+    if constraints is None or constraints.fixed_temperature is None:
+        return temperature
+
+    applied = constraints.fixed_temperature
+    if warn and temperature != applied:
+        logger.warning(
+            "Applying fixed temperature for constrained model: "
+            "provider=%s model=%s requested_temperature=%s applied_temperature=%s",
+            normalized_provider,
+            normalized_model,
+            temperature,
+            applied,
+        )
+    return applied
 
 
 LLM_RETRY_MAX_ATTEMPTS = 4
@@ -593,6 +653,7 @@ def _logged_invoke(
 
     call_id = str(uuid.uuid4())
     effective_run_id = _get_effective_run_id(run_id)
+    temperature = resolve_temperature(provider, model, temperature, warn=False)
 
     execution_logger.start_llm_call(
         call_id=call_id,
@@ -679,6 +740,7 @@ async def _logged_ainvoke(
 
     call_id = str(uuid.uuid4())
     effective_run_id = _get_effective_run_id(run_id)
+    temperature = resolve_temperature(provider, model, temperature, warn=False)
 
     execution_logger.start_llm_call(
         call_id=call_id,
@@ -779,6 +841,7 @@ async def _logged_astream(
 
     call_id = str(uuid.uuid4())
     effective_run_id = _get_effective_run_id(run_id)
+    temperature = resolve_temperature(provider, model, temperature, warn=False)
 
     if out_call_info is not None:
         out_call_info["call_id"] = call_id
@@ -1059,7 +1122,10 @@ def create_langchain_llm(
       reasoning.effort へ正規化)、Ollama では reasoning へマッピング。
       ``"none"`` (大文字小文字を問わない) は Thinking 無効として
       Ollama の ``reasoning=False`` (``think=false``) へ変換する。
+    temperature: モデル制約 (``MODEL_PARAMETER_CONSTRAINTS``) があれば、
+      呼び出し元の指定値より優先して適用する。
     """
+    temperature = resolve_temperature(provider, model, temperature)
     cleaned_effort = reasoning_effort.strip() if isinstance(reasoning_effort, str) and reasoning_effort.strip() else None
 
     if provider == "openai":
@@ -1106,6 +1172,7 @@ def create_opencode_go_llm(
     session_id: str | None = None,
 ):
     """OpenCode Go 用 LangChain ChatModel を返す。"""
+    temperature = resolve_temperature("opencode_go", model, temperature)
     api_key = config.OPENCODE_API_KEY
     if not api_key:
         raise RuntimeError("Environment variable OPENCODE_API_KEY is not set")

@@ -878,6 +878,13 @@ export function updatePlannerProposal(
   );
 }
 
+export function deletePlannerProposal(proposalId: string): Promise<void> {
+  return request<void>(
+    `/api/v1/planner/proposals/${encodeURIComponent(proposalId)}`,
+    { method: "DELETE" },
+  );
+}
+
 export function rejectPlannerProposal(
   proposalId: string,
   payload: PlannerRejectPayload = {},

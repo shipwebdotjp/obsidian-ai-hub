@@ -177,6 +177,20 @@ def reject_planner_proposal(
     return updated
 
 
+def delete_planner_proposal(proposal_id: str) -> None:
+    """Physically delete a still-proposed AI proposal.
+
+    Raises LookupError when the proposal does not exist and ValueError when it
+    has already been promoted, rejected, or expired. In both failure cases the
+    row is left untouched.
+    """
+    if store.delete_proposed_proposal(proposal_id):
+        return
+    if store.get_proposal(proposal_id) is None:
+        raise LookupError(f"Proposal not found: {proposal_id}")
+    raise ValueError(f"Proposal {proposal_id} is not 'proposed'")
+
+
 def promote_planner_proposal(proposal_id: str) -> dict:
     return promote_service.promote_proposal(proposal_id)
 

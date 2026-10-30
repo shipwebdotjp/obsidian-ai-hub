@@ -89,6 +89,10 @@ llm:
 - **OpenAI 互換**（`ChatOpenAI`）: `glm-`、`kimi-`、`deepseek-`、`mimo-`
 - **Anthropic 互換**（`ChatAnthropic`）: `minimax-`、`qwen3.7-`、`qwen3.6-`
 
+`kimi-k3.1-pro` は temperature に `1` のみ受け付けます。このモデルでは指定値や既定値に
+かかわらず常に `1` を送信し、指定値が `1` 以外の場合は provider・モデル名・指定値・
+適用値を warning ログに記録します。
+
 ```yaml
 llm:
   make_today_target:
